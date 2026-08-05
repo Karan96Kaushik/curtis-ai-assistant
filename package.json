@@ -7,17 +7,26 @@
   "type": "commonjs",
   "main": "bot/client.js",
   "scripts": {
-    "start": "node bot/client.js",
+    "start": "nodemon --ignore context/ bot/client.js",
     "bot": "node bot/client.js",
     "cli": "node cli.js",
     "register-commands": "node scripts/register-commands.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "groq:billing": "node scripts/check-groq-billing.js",
+    "extension:pack": "node scripts/pack-firefox-extension.js",
+    "playwright:install": "playwright install chromium",
+    "postinstall": "playwright install chromium",
+    "test:github-list-repos": "node scripts/test-github-list-repos.js",
+    "test": "npm run test:github-list-repos"
   },
   "dependencies": {
+    "axios": "^1.18.1",
     "commander": "^15.0.0",
+    "cron-parser": "^5.6.2",
     "discord.js": "^14.26.5",
     "dotenv": "^16.4.7",
     "groq-sdk": "^1.3.0",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "playwright": "^1.61.1",
+    "ws": "^8.21.1"
   }
 }

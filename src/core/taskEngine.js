@@ -1,14 +1,11 @@
-const jiraUpdateTask = require('../tasks/jiraUpdate');
-const jiraMyIssuesTask = require('../tasks/jiraMyIssues');
-const jiraWhoamiTask = require('../tasks/jiraWhoami');
-const jiraCreateTask = require('../tasks/jiraCreate');
+const registry = require('./moduleRegistry');
 
-const tasks = {
-  'jira-update': jiraUpdateTask,
-  'jira-my-issues': jiraMyIssuesTask,
-  'jira-whoami': jiraWhoamiTask,
-  'jira-create': jiraCreateTask,
-};
+let modulesLoaded = false;
+function ensureModules() {
+  if (modulesLoaded) return;
+  modulesLoaded = true;
+  require('../modules/index');
+}
 
 /**
  * Dispatch a named task with the given payload.
@@ -17,16 +14,18 @@ const tasks = {
  * @returns {Promise<*>}
  */
 async function run(name, payload = {}) {
-  const task = tasks[name];
+  ensureModules();
+  const task = registry.getTask(name);
   if (!task) {
-    const known = Object.keys(tasks).join(', ') || '(none)';
+    const known = registry.getTasks().join(', ') || '(none)';
     throw new Error(`Unknown task: ${name}. Known tasks: ${known}`);
   }
   return task(payload);
 }
 
 function listTasks() {
-  return Object.keys(tasks);
+  ensureModules();
+  return registry.getTasks();
 }
 
-module.exports = { run, listTasks, tasks };
+module.exports = { run, listTasks };

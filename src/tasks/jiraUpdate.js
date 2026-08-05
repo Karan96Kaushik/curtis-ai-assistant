@@ -1,19 +1,23 @@
-const { createJiraClient, JiraError } = require('../integrations/jiraClient');
+const { createJiraClient, JiraError, browseUrl } = require('../integrations/jiraClient');
 
 /**
- * Update a Jira issue: optional status transition and/or comment.
- * @param {{ issue: string, status?: string, comment?: string }} payload
+ * Update a Jira issue: optional status, comment, and/or description (markdown).
+ * @param {{ issue: string, status?: string, comment?: string, description?: string }} payload
  */
 async function jiraUpdateTask(payload) {
   const issue = payload?.issue?.trim();
   const status = payload?.status?.trim() || undefined;
   const comment = payload?.comment?.trim() || undefined;
+  const description =
+    payload?.description !== undefined && payload?.description !== null
+      ? String(payload.description)
+      : undefined;
 
   if (!issue) {
     throw new Error('Missing required field: issue');
   }
-  if (!status && !comment) {
-    throw new Error('Provide at least one of: status, comment');
+  if (!status && !comment && description === undefined) {
+    throw new Error('Provide at least one of: status, comment, description');
   }
 
   const jira = createJiraClient();
@@ -31,8 +35,10 @@ async function jiraUpdateTask(payload) {
 
   const result = {
     issueKey,
+    browseUrl: browseUrl(jira.baseUrl, issueKey),
     transitionedTo: null,
     commentAdded: false,
+    descriptionUpdated: false,
   };
 
   if (status) {
@@ -53,6 +59,11 @@ async function jiraUpdateTask(payload) {
     result.transitionedTo = match.name;
   }
 
+  if (description !== undefined) {
+    await jira.updateIssue(issueKey, { description });
+    result.descriptionUpdated = true;
+  }
+
   if (comment) {
     await jira.addComment(issueKey, comment);
     result.commentAdded = true;
@@ -66,8 +77,14 @@ function formatResult(result) {
   if (result.transitionedTo) {
     parts.push(`status → ${result.transitionedTo}`);
   }
+  if (result.descriptionUpdated) {
+    parts.push('description updated');
+  }
   if (result.commentAdded) {
     parts.push('comment added');
+  }
+  if (result.browseUrl) {
+    parts.push(`URL: ${result.browseUrl}`);
   }
   return parts.join('; ');
 }

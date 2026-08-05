@@ -4,6 +4,10 @@ const { Client, Events, GatewayIntentBits, Partials, ChannelType } = require('di
 const { executeTask } = require('../src/discord/taskRunner');
 const discordAgent = require('../src/ai/discordAgent');
 const { DEFAULT_MODEL } = require('../src/integrations/groqClient');
+const { startTimer } = require('../src/util/timing');
+const config = require('../src/config');
+const scheduler = require('../src/core/scheduler');
+const extensionBridge = require('../src/integrations/extensionBridge');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APP_ID = process.env.DISCORD_APP_ID || process.env.DISCORD_CLIENT_ID;
@@ -23,6 +27,8 @@ const KNOWN_COMMANDS = new Set([
   'jira-my-issues',
   'jira-create',
   'jira-whoami',
+  'jira-list-comments',
+  'jira-delete-comment',
   'help',
 ]);
 
@@ -45,9 +51,11 @@ function helpText() {
   const p = COMMAND_PREFIX;
   const lines = [
     'Commands (slash or message):',
-    `\`${p}jira-my-issues [--max N] [--status Name]\``,
-    `\`${p}jira-update --issue KEY [--status Name] [--comment Text]\``,
-    `\`${p}jira-create --project KEY --summary Text [--type Task] [--description Text] [--assign-me]\``,
+    `\`${p}jira-my-issues [--max N] [--status Name] [--query Text] [--types Story,Epic] [--resolution unresolved|resolved|all]\``,
+    `\`${p}jira-update --issue KEY [--status Name] [--description Text] [--comment Text]\``,
+    `\`${p}jira-create --project KEY --summary Text [--type Task] [--description Text] [--no-assign-me]\``,
+    `\`${p}jira-list-comments --issue KEY [--max N]\``,
+    `\`${p}jira-delete-comment --issue KEY [--comment-id ID | --last]\``,
     `\`${p}jira-whoami\``,
   ];
   if (AI_ENABLED) {
@@ -83,6 +91,14 @@ function parseFlags(tokens) {
 
     if (rawKey === 'assign-me' || rawKey === 'assign_me') {
       flags.assignToMe = true;
+      continue;
+    }
+    if (rawKey === 'no-assign-me' || rawKey === 'no_assign_me') {
+      flags.assignToMe = false;
+      continue;
+    }
+    if (rawKey === 'last') {
+      flags.last = true;
       continue;
     }
 
@@ -163,6 +179,7 @@ async function runPrefixCommand(name, flags) {
 async function handleSlashCommand(interaction) {
   const name = interaction.commandName;
   console.log(`Slash command: /${name}`);
+  const total = startTimer(`discord.slash.${name}`);
   await interaction.deferReply();
 
   let payload = {};
@@ -170,47 +187,76 @@ async function handleSlashCommand(interaction) {
     payload = {
       issue: interaction.options.getString('issue'),
       status: interaction.options.getString('status') || undefined,
+      description: interaction.options.getString('description') || undefined,
       comment: interaction.options.getString('comment') || undefined,
     };
   } else if (name === 'jira-my-issues') {
     payload = {
       max: interaction.options.getInteger('max') || undefined,
       status: interaction.options.getString('status') || undefined,
+      query: interaction.options.getString('query') || undefined,
+      types: interaction.options.getString('types') || undefined,
+      resolution: interaction.options.getString('resolution') || undefined,
     };
   } else if (name === 'jira-create') {
+    const assignOpt = interaction.options.getBoolean('assign_me');
     payload = {
       project: interaction.options.getString('project'),
       summary: interaction.options.getString('summary'),
       type: interaction.options.getString('type') || undefined,
       description: interaction.options.getString('description') || undefined,
-      assignToMe: interaction.options.getBoolean('assign_me') || false,
+      assignToMe: assignOpt === null ? true : assignOpt,
+    };
+  } else if (name === 'jira-list-comments') {
+    payload = {
+      issue: interaction.options.getString('issue'),
+      max: interaction.options.getInteger('max') || undefined,
+    };
+  } else if (name === 'jira-delete-comment') {
+    payload = {
+      issue: interaction.options.getString('issue'),
+      commentId: interaction.options.getString('comment_id') || undefined,
+      deleteLast: interaction.options.getBoolean('last') || false,
     };
   } else if (name === 'jira-whoami') {
     payload = {};
   } else {
     await interaction.editReply({ content: `Unknown command \`/${name}\`.` });
+    total.end('unknown');
     return;
   }
 
   try {
     const content = await executeTask(name, payload);
     await interaction.editReply({ content: truncate(content) });
+    total.end('ok');
   } catch (err) {
     console.error(`/${name} failed:`, err.message || err);
     await interaction.editReply({ content: truncate(`Error: ${err.message || err}`) });
+    total.end('FAILED');
   }
 }
 
 async function replyWorking(message) {
-  return message.reply({ content: 'Working…' }).catch(() => null);
+  const timer = startTimer('discord.replyWorking');
+  try {
+    return await message.reply({ content: 'Working…' }).catch(() => null);
+  } finally {
+    timer.end();
+  }
 }
 
 async function finishReply(message, thinking, body) {
-  const text = truncate(body);
-  if (thinking) {
-    await thinking.edit(text).catch(() => message.reply(text));
-  } else {
-    await message.reply(text);
+  const timer = startTimer('discord.finishReply');
+  try {
+    const text = truncate(body);
+    if (thinking) {
+      await thinking.edit(text).catch(() => message.reply(text));
+    } else {
+      await message.reply(text);
+    }
+  } finally {
+    timer.end();
   }
 }
 
@@ -228,13 +274,16 @@ async function handleMessage(message) {
 
   if (!classified) return;
 
+  const total = startTimer('discord.handleMessage');
   const thinking = await replyWorking(message);
 
   try {
     let content;
     if (classified.kind === 'prefix') {
       console.log(`Message command: ${COMMAND_PREFIX}${classified.name} from ${message.author.tag}`);
+      const cmdTimer = startTimer(`discord.prefix.${classified.name}`);
       content = await runPrefixCommand(classified.name, classified.flags);
+      cmdTimer.end();
     } else {
       console.log(`AI message from ${message.author.tag}: ${classified.text.slice(0, 80)}`);
       content = await discordAgent.handleUserMessage({
@@ -243,9 +292,11 @@ async function handleMessage(message) {
       });
     }
     await finishReply(message, thinking, content);
+    total.end(`kind=${classified.kind}`);
   } catch (err) {
     console.error('Message handling failed:', err.message || err);
     await finishReply(message, thinking, `Error: ${err.message || err}`);
+    total.end(`kind=${classified.kind} FAILED`);
   }
 }
 
@@ -266,6 +317,17 @@ const client = new Client({
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Discord gateway connected as ${readyClient.user.tag}`);
+  console.log(
+    `REQUIRE_CONFIRMATION=${config.REQUIRE_CONFIRMATION} (toggle in src/config.js or env)`
+  );
+  
+  // Start the background scheduler
+  scheduler.start(client, discordAgent.handleUserMessage);
+  console.log('Background scheduler started (checks every 30s)');
+
+  // Localhost bridge for the Firefox extension (Curtis drives browser tools)
+  extensionBridge.start();
+  
   if (AI_ENABLED) {
     console.log(`Groq AI enabled (model=${DEFAULT_MODEL}) — mention/DM natural language`);
     if (AI_LISTEN_ALL) console.log('DISCORD_AI_LISTEN=all — all channel messages routed to AI');

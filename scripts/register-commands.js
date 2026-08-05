@@ -16,7 +16,7 @@ if (!BOT_TOKEN) {
 const commands = [
   {
     name: 'jira-update',
-    description: 'Update a Jira issue (status and/or comment)',
+    description: 'Update a Jira issue (status, description, and/or comment)',
     options: [
       {
         name: 'issue',
@@ -31,6 +31,12 @@ const commands = [
         required: false,
       },
       {
+        name: 'description',
+        description: 'Replace description (markdown)',
+        type: 3,
+        required: false,
+      },
+      {
         name: 'comment',
         description: 'Comment to add on the issue',
         type: 3,
@@ -40,7 +46,7 @@ const commands = [
   },
   {
     name: 'jira-my-issues',
-    description: 'List unresolved Jira issues assigned to you',
+    description: 'List Jira issues assigned to you (default: unresolved)',
     options: [
       {
         name: 'max',
@@ -55,6 +61,29 @@ const commands = [
         description: 'Filter by status name',
         type: 3,
         required: false,
+      },
+      {
+        name: 'query',
+        description: 'Topic/keyword filter (summary or body)',
+        type: 3,
+        required: false,
+      },
+      {
+        name: 'types',
+        description: 'Comma-separated issue types, e.g. Story,Epic',
+        type: 3,
+        required: false,
+      },
+      {
+        name: 'resolution',
+        description: 'unresolved (default), resolved, or all',
+        type: 3,
+        required: false,
+        choices: [
+          { name: 'unresolved', value: 'unresolved' },
+          { name: 'resolved', value: 'resolved' },
+          { name: 'all', value: 'all' },
+        ],
       },
     ],
   },
@@ -88,7 +117,51 @@ const commands = [
       },
       {
         name: 'assign_me',
-        description: 'Assign the issue to the Jira auth user',
+        description: 'Assign to auth user (default true if omitted)',
+        type: 5,
+        required: false,
+      },
+    ],
+  },
+  {
+    name: 'jira-list-comments',
+    description: 'List comments on a Jira issue',
+    options: [
+      {
+        name: 'issue',
+        description: 'Jira issue key',
+        type: 3,
+        required: true,
+      },
+      {
+        name: 'max',
+        description: 'Max comments (default 20)',
+        type: 4,
+        required: false,
+        min_value: 1,
+        max_value: 50,
+      },
+    ],
+  },
+  {
+    name: 'jira-delete-comment',
+    description: 'Delete a comment by id, or the last comment',
+    options: [
+      {
+        name: 'issue',
+        description: 'Jira issue key',
+        type: 3,
+        required: true,
+      },
+      {
+        name: 'comment_id',
+        description: 'Comment id to delete',
+        type: 3,
+        required: false,
+      },
+      {
+        name: 'last',
+        description: 'Delete the most recent comment',
         type: 5,
         required: false,
       },

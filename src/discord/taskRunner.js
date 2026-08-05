@@ -1,28 +1,45 @@
 const { run } = require('../core/taskEngine');
-const { formatResult: formatUpdate } = require('../tasks/jiraUpdate');
-const { formatResult: formatMyIssues } = require('../tasks/jiraMyIssues');
-const { formatResult: formatCreate } = require('../tasks/jiraCreate');
-const { formatResult: formatWhoami } = require('../tasks/jiraWhoami');
+const registry = require('../core/moduleRegistry');
+const { envelopeFromRaw } = require('../util/taskResult');
+const { startTimer } = require('../util/timing');
 
-async function executeTask(name, payload = {}) {
-  if (name === 'jira-update') {
-    return formatUpdate(await run('jira-update', payload));
+/**
+ * Run a task and return formatted text + structured envelope (for the agent ledger).
+ * @param {string} name
+ * @param {object} payload
+ * @returns {Promise<{ text: string, envelope: object, raw: object }>}
+ */
+async function executeTaskDetailed(name, payload = {}) {
+  const timer = startTimer(`task.${name}`);
+  try {
+    const raw = await run(name, payload);
+    const formatter = registry.getTaskFormatter(name);
+    
+    let text;
+    if (formatter) {
+      text = formatter(raw);
+    } else {
+      text = typeof raw === 'object' ? JSON.stringify(raw, null, 2) : String(raw);
+    }
+
+    const envelope = envelopeFromRaw(name, raw);
+    timer.end();
+    return { text, envelope, raw };
+  } catch (err) {
+    timer.end('FAILED');
+    throw err;
   }
-  if (name === 'jira-my-issues') {
-    return formatMyIssues(await run('jira-my-issues', payload));
-  }
-  if (name === 'jira-create') {
-    return formatCreate(
-      await run('jira-create', {
-        ...payload,
-        assignToMe: Boolean(payload.assignToMe || payload.assign_me),
-      })
-    );
-  }
-  if (name === 'jira-whoami') {
-    return formatWhoami(await run('jira-whoami'));
-  }
-  throw new Error(`Unknown task: ${name}`);
 }
 
-module.exports = { executeTask };
+/**
+ * Backward-compatible string result for Discord slash/prefix commands.
+ * @param {string} name
+ * @param {object} payload
+ * @returns {Promise<string>}
+ */
+async function executeTask(name, payload = {}) {
+  const { text } = await executeTaskDetailed(name, payload);
+  return text;
+}
+
+module.exports = { executeTask, executeTaskDetailed };

@@ -1,4 +1,4 @@
-const { createJiraClient } = require('../integrations/jiraClient');
+const { createJiraClient, browseUrl } = require('../integrations/jiraClient');
 
 /**
  * Create a Jira issue.
@@ -15,7 +15,11 @@ async function jiraCreateTask(payload = {}) {
   const summary = payload.summary?.trim();
   const issueType = payload.type?.trim() || 'Task';
   const description = payload.description?.trim() || undefined;
-  const assignToMe = Boolean(payload.assignToMe);
+  // Default: assign to auth user unless explicitly false
+  const assignToMe =
+    payload.assignToMe === undefined || payload.assignToMe === null
+      ? true
+      : Boolean(payload.assignToMe);
 
   if (!project) throw new Error('Missing required field: project');
   if (!summary) throw new Error('Missing required field: summary');
@@ -36,12 +40,12 @@ async function jiraCreateTask(payload = {}) {
   });
 
   const issueKey = created.key;
-  const browseUrl = `${jira.baseUrl}/browse/${issueKey}`;
+  const url = browseUrl(jira.baseUrl, issueKey);
 
   return {
     issueKey,
     id: created.id,
-    browseUrl,
+    browseUrl: url,
     project,
     summary,
     issueType,

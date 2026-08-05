@@ -3,3 +3,7 @@ node_modules/
 .DS_Store
 *.log
 .npm/
+dist/
+context/org-memory.md
+context/schedule.json
+context/releases/

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Curtis Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <h1>Curtis Bridge</h1>
+          <p class="tagline">Firefox ↔ local Curtis</p>
+        </div>
+      </div>
+      <span id="version" class="version">—</span>
+    </header>
+
+    <section class="card" id="connectionCard" data-state="unknown">
+      <div class="card-top">
+        <span class="pulse" aria-hidden="true"></span>
+        <div class="card-copy">
+          <p id="status" class="status">Checking…</p>
+          <p id="detail" class="detail"></p>
+        </div>
+      </div>
+      <dl class="meta" id="meta">
+        <div>
+          <dt>Endpoint</dt>
+          <dd id="metaUrl">—</dd>
+        </div>
+        <div>
+          <dt>Connected</dt>
+          <dd id="metaSince">—</dd>
+        </div>
+        <div>
+          <dt>Last RPC</dt>
+          <dd id="metaRpc">—</dd>
+        </div>
+        <div>
+          <dt>Calls</dt>
+          <dd id="metaCounts">—</dd>
+        </div>
+      </dl>
+      <div class="actions">
+        <button id="reconnectBtn" type="button" class="btn primary">Reconnect</button>
+        <button id="pauseBtn" type="button" class="btn">Pause</button>
+      </div>
+    </section>
+
+    <section class="card settings">
+      <button type="button" class="section-toggle" id="settingsToggle" aria-expanded="true">
+        Connection settings
+        <span class="chevron" aria-hidden="true"></span>
+      </button>
+      <div id="settingsBody" class="section-body">
+        <label>
+          WS URL
+          <div class="input-row">
+            <input id="wsUrl" type="text" placeholder="ws://127.0.0.1:8765" autocomplete="off" spellcheck="false" />
+            <button id="copyUrlBtn" type="button" class="btn ghost" title="Copy URL">Copy</button>
+          </div>
+        </label>
+        <label>
+          Token <span class="optional">(optional)</span>
+          <div class="input-row">
+            <input id="token" type="password" placeholder="EXTENSION_WS_TOKEN" autocomplete="off" />
+            <button id="toggleTokenBtn" type="button" class="btn ghost" title="Show token">Show</button>
+          </div>
+        </label>
+        <button id="saveBtn" type="button" class="btn primary block">Save &amp; reconnect</button>
+        <p id="toast" class="toast" hidden></p>
+      </div>
+    </section>
+
+    <section class="card tips">
+      <h2>Try in Discord</h2>
+      <ul>
+        <li><button type="button" class="chip" data-copy="are you connected to my browser?">browser status</button></li>
+        <li><button type="button" class="chip" data-copy="list my browser tabs">list tabs</button></li>
+        <li><button type="button" class="chip" data-copy="open Teams and list my recent chats">Teams chats</button></li>
+      </ul>
+      <p class="hint">Uses cleartext <code>ws://</code> only. Curtis must be running (<code>npm start</code>).</p>
+    </section>
+
+    <footer class="footer">
+      Temporary add-on · reload after pack
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
