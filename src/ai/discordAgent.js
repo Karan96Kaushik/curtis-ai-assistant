@@ -162,6 +162,21 @@ function coerceArgs(name, args) {
   if (name === 'jira_list_comments' && out.max != null) {
     out.max = Number(out.max);
   }
+  if (name === 'jira_monthly_activity' || name === 'github_monthly_activity') {
+    if (typeof out.month === 'string') {
+      out.month = out.month.trim();
+      if (!out.month) delete out.month;
+    }
+    if (out.year != null) out.year = Number(out.year);
+    if (out.max_issues != null) out.max_issues = Number(out.max_issues);
+    if (name === 'jira_monthly_activity') out.detail = coerceBoolean(out.detail, true);
+    if (name === 'github_monthly_activity') {
+      for (const key of ['logins', 'aliases']) {
+        if (Array.isArray(out[key])) out[key] = out[key].join(',');
+        if (typeof out[key] === 'string' && !out[key].trim()) delete out[key];
+      }
+    }
+  }
   if (name === 'memory_read' && out.max_chars != null) {
     out.max_chars = Number(out.max_chars);
   }
@@ -404,7 +419,7 @@ function shouldSynthesize(intent, toolResults) {
   if (intent.domain === 'web' || intent.domain === 'travel' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
   if (intent.isWorkAgenda || intent.isIssueList || intent.isIssueDetail) return true;
   return toolResults.some((t) =>
-    ['web_search', 'web_fetch_page', 'web_check_prices', 'jira_my_issues', 'jira_get_issue', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_skip', 'wf_release_revise_pending', 'wf_release_answer', 'wf_release_edit', 'wf_release_approve_review', 'wf_release_execute_pending'].includes(t.name)
+    ['web_search', 'web_fetch_page', 'web_check_prices', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_skip', 'wf_release_revise_pending', 'wf_release_answer', 'wf_release_edit', 'wf_release_approve_review', 'wf_release_execute_pending'].includes(t.name)
   );
 }
 

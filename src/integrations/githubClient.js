@@ -152,6 +152,41 @@ function createGithubClient(overrides = {}) {
     },
 
     /**
+     * List branches for a repo.
+     * @param {{ owner: string, repo: string, per_page?: number, page?: number }} opts
+     */
+    async listBranches({ owner, repo, per_page = 100, page = 1 } = {}) {
+      const params = new URLSearchParams({
+        per_page: String(Math.min(Math.max(Number(per_page) || 100, 1), 100)),
+        page: String(Math.max(Number(page) || 1, 1)),
+      });
+      return request(
+        'GET',
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?${params}`
+      );
+    },
+
+    /**
+     * List commits on a repo, optionally scoped to a ref and date window.
+     * Unlike the search API this sees every branch, not just the default one.
+     * @param {{ owner: string, repo: string, sha?: string, since?: string, until?: string, author?: string, per_page?: number, page?: number }} opts
+     */
+    async listCommits({ owner, repo, sha, since, until, author, per_page = 100, page = 1 } = {}) {
+      const params = new URLSearchParams({
+        per_page: String(Math.min(Math.max(Number(per_page) || 100, 1), 100)),
+        page: String(Math.max(Number(page) || 1, 1)),
+      });
+      if (sha) params.set('sha', sha);
+      if (since) params.set('since', since);
+      if (until) params.set('until', until);
+      if (author) params.set('author', author);
+      return request(
+        'GET',
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?${params}`
+      );
+    },
+
+    /**
      * Resolve a git ref (branch, tag, or SHA).
      * @param {{ owner: string, repo: string, ref: string }} opts
      */
@@ -246,6 +281,21 @@ function createGithubClient(overrides = {}) {
     },
 
     /**
+     * Search issues/PRs via Issues Search API.
+     * @param {{ q: string, per_page?: number, page?: number, sort?: string, order?: string }} opts
+     */
+    async searchIssues({ q, per_page = 50, page = 1, sort, order } = {}) {
+      const params = new URLSearchParams({
+        q: String(q || '').trim(),
+        per_page: String(Math.min(Math.max(Number(per_page) || 50, 1), 100)),
+        page: String(Math.max(Number(page) || 1, 1)),
+      });
+      if (sort) params.set('sort', sort);
+      if (order) params.set('order', order);
+      return request('GET', `/search/issues?${params}`);
+    },
+
+    /**
      * Search pull requests via Issues Search API (type:pr).
      * @param {{ q: string, per_page?: number, page?: number, sort?: string, order?: string }} opts
      */
@@ -254,14 +304,22 @@ function createGithubClient(overrides = {}) {
       if (!/\btype:pr\b/i.test(query)) {
         query = `${query} type:pr`.trim();
       }
+      return this.searchIssues({ q: query, per_page, page, sort, order });
+    },
+
+    /**
+     * Search commits via Commits Search API.
+     * @param {{ q: string, per_page?: number, page?: number, sort?: string, order?: string }} opts
+     */
+    async searchCommits({ q, per_page = 50, page = 1, sort, order } = {}) {
       const params = new URLSearchParams({
-        q: query,
-        per_page: String(Math.min(Math.max(Number(per_page) || 10, 1), 50)),
+        q: String(q || '').trim(),
+        per_page: String(Math.min(Math.max(Number(per_page) || 50, 1), 100)),
         page: String(Math.max(Number(page) || 1, 1)),
       });
       if (sort) params.set('sort', sort);
       if (order) params.set('order', order);
-      return request('GET', `/search/issues?${params}`);
+      return request('GET', `/search/commits?${params}`);
     },
 
     /**

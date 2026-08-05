@@ -61,6 +61,48 @@ function envelopeFromRaw(taskName, raw) {
     });
   }
 
+  // monthly activity reports — matched before the generic jira/github shapes
+  // because they also carry issues[] / repos[] arrays.
+  if (raw.reportType === 'jira-monthly-activity') {
+    return withEnvelope({
+      ok: true,
+      source: 'jira',
+      confidence: 'high',
+      data: {
+        month: raw.month,
+        range: raw.range,
+        issueCount: raw.issueCount,
+        eventCount: raw.eventCount,
+        stats: raw.stats,
+        jql: raw.jql,
+        issues: raw.issues,
+      },
+      warning: raw.detailTruncated
+        ? `Timeline detail limited to the ${raw.detailIssueCount} most recently updated issues.`
+        : undefined,
+    });
+  }
+
+  if (raw.reportType === 'github-monthly-activity') {
+    return withEnvelope({
+      ok: true,
+      source: 'github',
+      confidence: 'high',
+      data: {
+        month: raw.month,
+        range: raw.range,
+        login: raw.user?.login,
+        eventCount: raw.eventCount,
+        repoCount: raw.repoCount,
+        stats: raw.stats,
+        repos: raw.repos,
+      },
+      warning: raw.truncated
+        ? 'At least one GitHub search hit the result cap; counts may be partial.'
+        : undefined,
+    });
+  }
+
   // web-fetch-page
   if (raw.data?.url && (raw.data.text != null || raw.source === 'axios' || raw.source === 'playwright')) {
     return withEnvelope({

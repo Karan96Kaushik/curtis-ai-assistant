@@ -5,6 +5,7 @@ const jiraWhoamiTask = require('../tasks/jiraWhoami');
 const jiraCreateTask = require('../tasks/jiraCreate');
 const jiraComments = require('../tasks/jiraComments');
 const jiraGetIssueTask = require('../tasks/jiraGetIssue');
+const jiraMonthlyActivityTask = require('../tasks/jiraMonthlyActivity');
 const pendingActions = require('../ai/pendingActions');
 const config = require('../config');
 const { stageOrExecute, runConfirmedPending } = require('../util/mutatingGate');
@@ -14,6 +15,7 @@ const {
   extractIssueKeys,
   looksLikeIssueDetailFollowUp,
 } = require('../util/jiraKeys');
+const { looksLikeMonthlyActivity } = require('../util/monthRange');
 
 /** Run a jira task locally — avoids taskRunner circular dependency. */
 async function runLocalTask(name, execute, format, payload = {}) {
@@ -70,6 +72,20 @@ registry.register({
         forceJiraGetIssue: true,
         issueKey,
         isIssueDetail: true,
+      };
+    }
+
+    // "my Jira activity for July 2026" — month report beats agenda/list handling.
+    const monthly = looksLikeMonthlyActivity(t);
+    if (monthly && /\b(jira|ticket|issue|sprint|board)s?\b/i.test(t)) {
+      return {
+        domain: 'jira',
+        mode: 'activity',
+        budget: 'slow',
+        confidence: 'high',
+        reason: 'monthly-activity',
+        forceJiraMonthlyActivity: true,
+        monthRef: monthly.monthRef ? monthly.monthRef.source : null,
       };
     }
 
@@ -136,6 +152,30 @@ registry.register({
             query: { type: 'string', description: 'Keyword text search only — not issue keys' },
             types: { type: 'string' },
             resolution: { type: 'string', enum: ['unresolved', 'resolved', 'all'] },
+          },
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'jira_monthly_activity',
+        description:
+          'Full Jira activity report for the auth user over ONE calendar month: issues created, transitioned, commented on, edited, or logged work against, with a dated timeline per issue. Use for "what did I do in July", "my Jira activity last month", monthly recaps. Not for current open work (use jira_my_issues).',
+        parameters: {
+          type: 'object',
+          properties: {
+            month: {
+              type: 'string',
+              description:
+                'Month as YYYY-MM (e.g. 2026-07), "July 2026", "last month", or "this month". Defaults to the current month.',
+            },
+            year: { type: 'integer', description: 'Optional year if month is a bare name' },
+            detail: {
+              anyOf: [{ type: 'boolean' }, { type: 'string' }],
+              description: 'Include changelog/comments/worklog timeline (default true)',
+            },
+            max_issues: { type: 'integer', description: 'Max issues to scan (default 100)' },
           },
         },
       },
@@ -237,6 +277,10 @@ registry.register({
     'jira-update': { execute: jiraUpdateTask, format: jiraUpdateTask.formatResult },
     'jira-my-issues': { execute: jiraMyIssuesTask, format: jiraMyIssuesTask.formatResult },
     'jira-get-issue': { execute: jiraGetIssueTask, format: jiraGetIssueTask.formatResult },
+    'jira-monthly-activity': {
+      execute: jiraMonthlyActivityTask,
+      format: jiraMonthlyActivityTask.formatResult,
+    },
     'jira-whoami': { execute: jiraWhoamiTask, format: jiraWhoamiTask.formatResult },
     'jira-create': { execute: jiraCreateTask, format: jiraCreateTask.formatResult },
     'jira-list-comments': { execute: jiraComments.list, format: jiraComments.formatListResult },
@@ -267,6 +311,18 @@ registry.register({
         resolution: args.resolution,
       });
     },
+    jira_monthly_activity: async (args) =>
+      runLocalTask(
+        'jira-monthly-activity',
+        jiraMonthlyActivityTask,
+        jiraMonthlyActivityTask.formatResult,
+        {
+          month: args.month,
+          year: args.year,
+          detail: args.detail,
+          maxIssues: args.max_issues,
+        }
+      ),
     jira_whoami: async () =>
       runLocalTask('jira-whoami', jiraWhoamiTask, jiraWhoamiTask.formatResult),
     jira_list_comments: async (args) =>
@@ -344,10 +400,19 @@ registry.register({
       '- Never invent browse URLs. Use only the URL field from tool results (from JIRA_BASE_URL).',
       '- Chat history listing a key is NOT proof it exists/does not exist — always trust THIS turn’s jira_get_issue / jira_my_issues evidence.',
       '- If you lack description/status/comments for a named ticket, invoke jira_get_issue; do not stop and claim the dataset is incomplete.',
+      '- Past-period questions ("what did I do in July", "activity last month") → jira_monthly_activity, never jira_my_issues.',
     ].join('\n');
 
     let pack = '';
-    if (intent.forceJiraGetIssue || intent.isIssueDetail) {
+    if (intent.forceJiraMonthlyActivity) {
+      pack = [
+        'MONTHLY ACTIVITY mode (critical):',
+        `- Call jira_monthly_activity this turn${intent.monthRef ? ` with month="${intent.monthRef}"` : ''}.`,
+        '- Report only what the tool returned: issue counts, event counts, and the themes of the work.',
+        '- Group related tickets into themes; quote issue keys and URLs from the tool output.',
+        '- State the month explicitly so the user can confirm the period is right.',
+      ].join('\n');
+    } else if (intent.forceJiraGetIssue || intent.isIssueDetail) {
       pack = [
         'ISSUE DETAIL mode (critical):',
         `- Call jira_get_issue with issue=${intent.issueKey || '(key from user)'} this turn (include_comments=true if they want details).`,
@@ -383,6 +448,14 @@ registry.register({
         pushTool('cancel_pending', 'If user declined, cancel the staged action');
       }
     }
+    const jiraDomain = intent.domain === 'jira' || intent.domain === 'mixed';
+    if (intent.forceJiraMonthlyActivity || (intent.mode === 'activity' && jiraDomain)) {
+      pushTool(
+        'jira_monthly_activity',
+        `Month activity report${intent.monthRef ? ` for ${intent.monthRef}` : ''}`
+      );
+      return;
+    }
     if (intent.forceJiraGetIssue || intent.isIssueDetail) {
       pushTool('jira_get_issue', `Exact fetch for ${intent.issueKey || 'named issue key'}`);
       return;
@@ -409,6 +482,25 @@ registry.register({
           summary: d.summary,
           status: d.status,
           browseUrl: d.browseUrl,
+        });
+      }
+    }
+    if (tool === 'jira_monthly_activity') {
+      const d = envelope.data || {};
+      out.push({
+        type: 'activity_period',
+        domain: 'jira',
+        month: d.month,
+        issueCount: d.issueCount,
+        eventCount: d.eventCount,
+      });
+      for (const issue of (d.issues || []).slice(0, 30)) {
+        out.push({
+          type: 'issue',
+          key: issue.key,
+          summary: issue.summary,
+          status: issue.status,
+          browseUrl: issue.browseUrl,
         });
       }
     }

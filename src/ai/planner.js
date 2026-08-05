@@ -66,6 +66,9 @@ function summarizeGoal(intent, userText) {
 }
 
 function stopCondition(intent) {
+  if (intent.mode === 'activity') {
+    return `${intent.domain}_monthly_activity ran for the requested month; system will synthesize the recap`;
+  }
   if (intent.mode === 'agenda') return 'jira_my_issues ran; system will synthesize agenda';
   if (intent.mode === 'lookup' && intent.domain === 'jira') return 'jira_my_issues ran this turn';
   if (intent.domain === 'travel') return 'web_check_prices ran or dates missing asked once';

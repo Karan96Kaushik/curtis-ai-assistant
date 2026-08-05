@@ -12,6 +12,8 @@
     "cli": "node cli.js",
     "register-commands": "node scripts/register-commands.js",
     "groq:billing": "node scripts/check-groq-billing.js",
+    "jira:activity": "node scripts/jira-monthly-activity.js",
+    "github:activity": "node scripts/github-monthly-activity.js",
     "extension:pack": "node scripts/pack-firefox-extension.js",
     "playwright:install": "playwright install chromium",
     "postinstall": "playwright install chromium",

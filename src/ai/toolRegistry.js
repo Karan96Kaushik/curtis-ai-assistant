@@ -55,11 +55,18 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('cancel_pending');
   }
 
-  if (intent.domain === 'jira' || intent.domain === 'mixed' || intent.forceJiraMyIssues || intent.forceJiraGetIssue) {
+  if (
+    intent.domain === 'jira' ||
+    intent.domain === 'mixed' ||
+    intent.forceJiraMyIssues ||
+    intent.forceJiraGetIssue ||
+    intent.forceJiraMonthlyActivity
+  ) {
     allowed.add('jira_my_issues');
     allowed.add('jira_get_issue');
     allowed.add('jira_list_comments');
     allowed.add('jira_whoami');
+    allowed.add('jira_monthly_activity');
   }
   
   if (intent.domain === 'jira' || intent.domain === 'mixed') {
@@ -105,12 +112,17 @@ function toolsForIntent(intent, opts = {}) {
     }
   }
 
-  if (intent.domain === 'github' || intent.domain === 'mixed') {
+  if (
+    intent.domain === 'github' ||
+    intent.domain === 'mixed' ||
+    intent.forceGithubMonthlyActivity
+  ) {
     allowed.add('github_search_repos');
     allowed.add('github_list_repos');
     allowed.add('github_list_tags');
     allowed.add('github_search_prs');
     allowed.add('github_get_pr');
+    allowed.add('github_monthly_activity');
     if (intent.mode === 'mutate' || intent.mode === 'confirm' || hasPending) {
       allowed.add('github_create_tag');
     }
@@ -150,6 +162,7 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('jira_get_issue');
     allowed.add('jira_list_comments');
     allowed.add('jira_whoami');
+    allowed.add('jira_monthly_activity');
     allowed.add('web_search');
     allowed.add('web_fetch_page');
     allowed.add('schedule_task');
@@ -170,6 +183,7 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('github_list_tags');
     allowed.add('github_search_prs');
     allowed.add('github_get_pr');
+    allowed.add('github_monthly_activity');
   }
 
   return allTools.filter(t => allowed.has(t.function.name));

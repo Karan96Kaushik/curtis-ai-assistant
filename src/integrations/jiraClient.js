@@ -293,18 +293,69 @@ function createJiraClient(overrides = {}) {
 
     /**
      * Search issues via JQL (enhanced search endpoint).
-     * @param {{ jql: string, maxResults?: number, fields?: string[] }} opts
+     * @param {{ jql: string, maxResults?: number, fields?: string[], nextPageToken?: string }} opts
      */
-    async searchIssues({ jql, maxResults = 50, fields } = {}) {
-      const data = await request('POST', '/rest/api/3/search/jql', {
+    async searchIssues({ jql, maxResults = 50, fields, nextPageToken } = {}) {
+      const body = {
         jql,
         maxResults,
         fields: fields || ['summary', 'status', 'priority', 'issuetype', 'updated', 'assignee'],
-      });
+      };
+      if (nextPageToken) {
+        body.nextPageToken = nextPageToken;
+      }
+      const data = await request('POST', '/rest/api/3/search/jql', body);
       return {
         issues: data.issues || [],
         isLast: data.isLast,
         nextPageToken: data.nextPageToken,
+        raw: data,
+      };
+    },
+
+    /**
+     * Paginated issue changelog.
+     * @param {string} issueKey
+     * @param {{ maxResults?: number, startAt?: number }} [opts]
+     */
+    async getChangelog(issueKey, { maxResults = 100, startAt = 0 } = {}) {
+      const params = new URLSearchParams({
+        maxResults: String(maxResults),
+        startAt: String(startAt),
+      });
+      const data = await request(
+        'GET',
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}/changelog?${params}`
+      );
+      return {
+        values: data.values || [],
+        startAt: data.startAt ?? startAt,
+        maxResults: data.maxResults ?? maxResults,
+        total: data.total ?? (data.values || []).length,
+        isLast: data.isLast,
+        raw: data,
+      };
+    },
+
+    /**
+     * Paginated worklogs for an issue.
+     * @param {string} issueKey
+     * @param {{ maxResults?: number, startAt?: number }} [opts]
+     */
+    async getWorklogs(issueKey, { maxResults = 100, startAt = 0 } = {}) {
+      const params = new URLSearchParams({
+        maxResults: String(maxResults),
+        startAt: String(startAt),
+      });
+      const data = await request(
+        'GET',
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog?${params}`
+      );
+      return {
+        worklogs: data.worklogs || [],
+        startAt: data.startAt ?? startAt,
+        maxResults: data.maxResults ?? maxResults,
+        total: data.total ?? (data.worklogs || []).length,
         raw: data,
       };
     },

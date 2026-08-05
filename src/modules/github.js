@@ -5,6 +5,8 @@ const githubListTagsTask = require('../tasks/githubListTags');
 const githubCreateTagTask = require('../tasks/githubCreateTag');
 const githubSearchPrsTask = require('../tasks/githubSearchPrs');
 const githubGetPrTask = require('../tasks/githubGetPr');
+const githubMonthlyActivityTask = require('../tasks/githubMonthlyActivity');
+const { looksLikeMonthlyActivity } = require('../util/monthRange');
 const { stageOrExecute } = require('../util/mutatingGate');
 const { envelopeFromRaw } = require('../util/taskResult');
 const { startTimer } = require('../util/timing');
@@ -35,6 +37,7 @@ function looksLikeGithub(text) {
     /\b(repos?|repositories)\b/i.test(t) ||
     /\b(pull requests?|\bPRs?\b)\b/i.test(t) ||
     /\b(git\s+)?tags?\b/i.test(t) ||
+    /\bcommits?\b/i.test(t) ||
     /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+\b/.test(t)
   );
 }
@@ -45,6 +48,20 @@ registry.register({
   intent: (text) => {
     const t = String(text || '').trim();
     if (!looksLikeGithub(t)) return null;
+
+    // "my GitHub activity for July 2026" — month report beats repo/PR lookups.
+    const monthly = looksLikeMonthlyActivity(t);
+    if (monthly && /\b(github|gh|commits?|prs?|pull requests?)\b/i.test(t)) {
+      return {
+        domain: 'github',
+        mode: 'activity',
+        budget: 'slow',
+        confidence: 'high',
+        reason: 'monthly-activity',
+        forceGithubMonthlyActivity: true,
+        monthRef: monthly.monthRef ? monthly.monthRef.source : null,
+      };
+    }
 
     // Prefer explicit github / PR / tag / repo language over generic "repo"
     const strong =
@@ -165,6 +182,39 @@ registry.register({
     {
       type: 'function',
       function: {
+        name: 'github_monthly_activity',
+        description:
+          'Full GitHub activity report over ONE calendar month: commits authored/committed on ALL branches (not just default ones), PRs opened/updated/reviewed, issues, and comments, grouped by repository. Covers every identity belonging to the user (the auth account, extra logins, and unlinked git author/committer names or emails) — no need to pass logins or aliases. Use for "what did I ship in July", "my GitHub activity last month", monthly recaps.',
+        parameters: {
+          type: 'object',
+          properties: {
+            month: {
+              type: 'string',
+              description:
+                'Month as YYYY-MM (e.g. 2026-07), "July 2026", "last month", or "this month". Defaults to the current month.',
+            },
+            year: { type: 'integer', description: 'Optional year if month is a bare name' },
+            login: {
+              type: 'string',
+              description: 'Primary GitHub login to report on (defaults to the auth user)',
+            },
+            logins: {
+              type: 'string',
+              description:
+                'Comma-separated extra GitHub logins to include. Omit to use the configured defaults.',
+            },
+            aliases: {
+              type: 'string',
+              description:
+                'Comma-separated git author/committer name or email fragments to include. Omit to use the configured defaults.',
+            },
+          },
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'github_get_pr',
         description: 'Read a single pull request by repo and number (title, body, state, diff stats).',
         parameters: {
@@ -203,6 +253,10 @@ registry.register({
     'github-get-pr': {
       execute: githubGetPrTask,
       format: githubGetPrTask.formatResult,
+    },
+    'github-monthly-activity': {
+      execute: githubMonthlyActivityTask,
+      format: githubMonthlyActivityTask.formatResult,
     },
   },
 
@@ -259,6 +313,19 @@ registry.register({
         owner: args.owner,
         number: args.number,
       }),
+    github_monthly_activity: async (args) =>
+      runLocalTask(
+        'github-monthly-activity',
+        githubMonthlyActivityTask,
+        githubMonthlyActivityTask.formatResult,
+        {
+          month: args.month,
+          year: args.year,
+          login: args.login,
+          logins: args.logins,
+          aliases: args.aliases,
+        }
+      ),
   },
 
   promptPack: () =>
@@ -270,6 +337,7 @@ registry.register({
       '- Check/list tags → github_list_tags (set tag= to check existence).',
       '- Create tag → github_create_tag (gated when confirmation is on).',
       '- Search/list PRs → github_search_prs; read one PR → github_get_pr.',
+      '- Past-period questions ("what did I ship in July", "activity last month") → github_monthly_activity.',
       '- Cite html_url from tool results.',
     ].join('\n'),
 
@@ -277,6 +345,13 @@ registry.register({
     if (intent.domain !== 'github' && intent.domain !== 'mixed') return;
     const t = String(userText || '');
 
+    if (intent.forceGithubMonthlyActivity) {
+      pushTool(
+        'github_monthly_activity',
+        `Month activity report${intent.monthRef ? ` for ${intent.monthRef}` : ''}`
+      );
+      return;
+    }
     if (/\b(create|make|add|push)\b.{0,40}\btag\b/i.test(t)) {
       pushTool('github_create_tag', 'Create the requested git tag (propose if gated)');
       return;
@@ -351,6 +426,25 @@ registry.register({
         state: d.state,
         url: d.html_url,
       });
+    }
+    if (tool === 'github_monthly_activity') {
+      out.push({
+        type: 'activity_period',
+        domain: 'github',
+        month: d.month,
+        eventCount: d.eventCount,
+        repoCount: d.repoCount,
+      });
+      for (const group of (d.repos || []).slice(0, 20)) {
+        out.push({
+          type: 'repo_activity',
+          full_name: group.repo,
+          url: group.url,
+          events: group.activityCount,
+          commits: group.commitCount,
+          prs: group.prCount,
+        });
+      }
     }
     if (/Created tag /i.test(text)) {
       out.push({ type: 'side_effect', value: text.split('\n')[0].slice(0, 160) });

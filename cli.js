@@ -17,6 +17,14 @@ const { formatResult: formatGhListTags } = require('./src/tasks/githubListTags')
 const { formatResult: formatGhCreateTag } = require('./src/tasks/githubCreateTag');
 const { formatResult: formatGhSearchPrs } = require('./src/tasks/githubSearchPrs');
 const { formatResult: formatGhGetPr } = require('./src/tasks/githubGetPr');
+const {
+  formatResult: formatJiraActivity,
+  formatFullReport: formatJiraActivityFull,
+} = require('./src/tasks/jiraMonthlyActivity');
+const {
+  formatResult: formatGhActivity,
+  formatFullReport: formatGhActivityFull,
+} = require('./src/tasks/githubMonthlyActivity');
 
 const program = new Command();
 
@@ -145,6 +153,59 @@ program
         resolution: opts.resolution,
       });
       console.log(formatMyIssues(result));
+    } catch (err) {
+      console.error(err.message || err);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('jira-monthly-activity')
+  .description('Full Jira activity report for one calendar month')
+  .option('--month <ref>', 'YYYY-MM, "July 2026", last month, or this month')
+  .option('--year <year>', 'Year, if --month is a bare month name')
+  .option('--no-detail', 'Skip changelog/comment/worklog timeline (faster)')
+  .option('--max-issues <n>', 'Max issues to scan (default 100)')
+  .option('--full', 'Print the full per-issue timeline instead of a summary')
+  .action(async (opts) => {
+    try {
+      const result = await run('jira-monthly-activity', {
+        month: opts.month,
+        year: opts.year,
+        detail: opts.detail,
+        maxIssues: opts.maxIssues,
+      });
+      console.log(opts.full ? formatJiraActivityFull(result) : formatJiraActivity(result));
+    } catch (err) {
+      console.error(err.message || err);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('github-monthly-activity')
+  .description('Full GitHub activity report for one calendar month')
+  .option('--month <ref>', 'YYYY-MM, "July 2026", last month, or this month')
+  .option('--year <year>', 'Year, if --month is a bare month name')
+  .option('--login <user>', 'Primary GitHub login (default: auth user)')
+  .option('--logins <list>', 'Comma-separated extra logins (default: config)')
+  .option('--aliases <list>', 'Comma-separated git name/email fragments (default: config)')
+  .option('--exclude-owners <list>', 'Comma-separated repo owners to skip (default: config)')
+  .option('--no-all-branches', 'Only look at default branches (skip the branch sweep)')
+  .option('--full', 'Print the full per-repo timeline instead of a summary')
+  .action(async (opts) => {
+    try {
+      const result = await run('github-monthly-activity', {
+        month: opts.month,
+        year: opts.year,
+        login: opts.login,
+        logins: opts.logins,
+        aliases: opts.aliases,
+        excludeOwners: opts.excludeOwners,
+        // Only override the config default when --no-all-branches was passed.
+        allBranches: opts.allBranches === false ? false : undefined,
+      });
+      console.log(opts.full ? formatGhActivityFull(result) : formatGhActivity(result));
     } catch (err) {
       console.error(err.message || err);
       process.exitCode = 1;
