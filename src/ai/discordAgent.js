@@ -14,6 +14,7 @@ const { executeTaskDetailed } = require('../discord/taskRunner');
 const { startTimer } = require('../util/timing');
 const { nowForPrompt } = require('../util/time');
 const { lastIssueKeyFromHistory, extractIssueKeys } = require('../util/jiraKeys');
+const { parseGithubUrl } = require('../integrations/githubClient');
 const config = require('../config');
 
 const MAX_TOOL_ROUNDS = 8;
@@ -118,6 +119,22 @@ function sanitizeMyIssuesArgs(args, userText) {
 /** Full tool catalog (tests / introspection). Prefer toolsForIntent at runtime. */
 const TOOLS = buildAllTools({ confirmOn: true });
 
+function githubUrlGrounding(ghUrl) {
+  const lines = [
+    'GITHUB LINK: Use github_* tools (the GitHub client). Do not call web_fetch_page or scrape github.com.',
+  ];
+  if (ghUrl.kind === 'pull' && ghUrl.full_name && ghUrl.number) {
+    lines.push(`Call github_get_pr now with repo="${ghUrl.full_name}" and number=${ghUrl.number}.`);
+  } else if (ghUrl.kind === 'tags' && ghUrl.full_name) {
+    lines.push(`Call github_list_tags now with repo="${ghUrl.full_name}".`);
+  } else if ((ghUrl.kind === 'org' || ghUrl.kind === 'user') && ghUrl.owner) {
+    lines.push(`Call github_list_repos now with org="${ghUrl.owner}".`);
+  } else if (ghUrl.full_name) {
+    lines.push(`Call github_search_repos now with query="repo:${ghUrl.full_name}".`);
+  }
+  return lines.join(' ');
+}
+
 function coerceBoolean(value, defaultValue = undefined) {
   if (value === undefined || value === null || value === '') {
     return defaultValue;
@@ -180,11 +197,32 @@ function coerceArgs(name, args) {
   if (name === 'memory_read' && out.max_chars != null) {
     out.max_chars = Number(out.max_chars);
   }
+  if (name === 'clear_chat' && out.limit != null) {
+    out.limit = Number(out.limit);
+  }
 
   if (name?.startsWith('github_')) {
     if (out.max != null) out.max = Number(out.max);
     if (out.number != null) out.number = Number(out.number);
-    if (typeof out.repo === 'string') out.repo = out.repo.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '');
+    if (typeof out.url === 'string' && !out.repo) out.repo = out.url;
+    const ghUrl = parseGithubUrl(out.repo || out.url || out.query || '');
+    if (ghUrl?.full_name) {
+      if (typeof out.repo === 'string' || out.url) out.repo = ghUrl.full_name;
+      if (out.number == null && ghUrl.number != null) out.number = ghUrl.number;
+      if (name === 'github_search_repos' && typeof out.query === 'string') {
+        out.query = `repo:${ghUrl.full_name}`;
+      }
+      if (
+        name === 'github_list_repos' &&
+        !out.org &&
+        (ghUrl.kind === 'org' || ghUrl.kind === 'user') &&
+        ghUrl.owner
+      ) {
+        out.org = ghUrl.owner;
+      }
+    } else if (typeof out.repo === 'string') {
+      out.repo = out.repo.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '');
+    }
     if (typeof out.tag === 'string') out.tag = out.tag.replace(/^refs\/tags\//, '').trim();
   }
 
@@ -419,7 +457,7 @@ function shouldSynthesize(intent, toolResults) {
   if (intent.domain === 'web' || intent.domain === 'travel' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
   if (intent.isWorkAgenda || intent.isIssueList || intent.isIssueDetail) return true;
   return toolResults.some((t) =>
-    ['web_search', 'web_fetch_page', 'web_check_prices', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_skip', 'wf_release_revise_pending', 'wf_release_answer', 'wf_release_edit', 'wf_release_approve_review', 'wf_release_execute_pending'].includes(t.name)
+    ['web_search', 'web_fetch_page', 'web_check_prices', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
   );
 }
 
@@ -550,6 +588,13 @@ async function handleUserMessage({ text, discord }) {
       });
     }
 
+    if (intent.forceGithub && intent.githubUrl) {
+      messages.push({
+        role: 'system',
+        content: githubUrlGrounding(intent.githubUrl),
+      });
+    }
+
     prep.end(
       `intent=${intent.domain}/${intent.mode} budget=${intent.budget} tools=${tools.length} history=${history.length} planSteps=${plan.steps.length}`
     );
@@ -559,6 +604,8 @@ async function handleUserMessage({ text, discord }) {
     console.log(`[agent] plan:\n${formatPlanForPrompt(plan)}`);
 
     let draft = '';
+    /** Tool output that is the final reply as-is (e.g. a full timesheet table). */
+    let verbatimReply = '';
 
     // Capability/help asks: disable tools so the model cannot invent names like "synthesize".
     const forceNoTools = isCapabilityAsk(text);
@@ -642,6 +689,7 @@ async function handleUserMessage({ text, discord }) {
           const resultText = String(payload.text);
           toolResults.push({ name: fnName, result: resultText });
           evidence.ingest(fnName, { text: resultText, envelope: payload.envelope });
+          if (payload.verbatim && payload.envelope?.ok !== false) verbatimReply = resultText;
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
@@ -649,6 +697,7 @@ async function handleUserMessage({ text, discord }) {
           });
         }
         roundTimer.end(`tool_calls=${toolCalls.map((c) => c.function?.name).join(',')}`);
+        if (verbatimReply) break;
         continue;
       }
 
@@ -696,9 +745,30 @@ async function handleUserMessage({ text, discord }) {
         continue;
       }
 
-      // Hard gate: open-URL requests must call web_fetch_page
+      // Hard gate: github.com links must use github_* tools, not web_fetch_page
+      if (
+        intent.forceGithub &&
+        intent.githubUrl &&
+        !toolResults.some((t) => String(t.name || '').startsWith('github_')) &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        const u = intent.githubUrl;
+        console.warn(
+          `[grounding] github.com link without github_* tool — forcing for ${u.full_name || u.owner || 'github.com'}`
+        );
+        messages.push({ role: 'assistant', content: draft || '(draft)' });
+        messages.push({
+          role: 'system',
+          content: `GROUNDING: ${githubUrlGrounding(u)}`,
+        });
+        roundTimer.end('force_github_client');
+        continue;
+      }
+
+      // Hard gate: open-URL requests must call web_fetch_page (never github.com)
       if (
         intent.forceWebFetch &&
+        !parseGithubUrl(intent.pageUrl || '') &&
         !toolResults.some((t) => t.name === 'web_fetch_page') &&
         round < MAX_TOOL_ROUNDS - 1
       ) {
@@ -716,13 +786,31 @@ async function handleUserMessage({ text, discord }) {
         continue;
       }
 
+      // Hard gate: timesheet requests must call timesheet_draft (never a hand-written table)
+      if (
+        intent.forceTimesheet &&
+        !toolResults.some((t) => t.name === 'timesheet_draft') &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        console.warn('[grounding] timesheet request without timesheet_draft — forcing tool call');
+        messages.push({ role: 'assistant', content: draft || '(draft)' });
+        messages.push({
+          role: 'system',
+          content: `GROUNDING: Call timesheet_draft now${intent.monthRef ? ` with month="${intent.monthRef}"` : ''}. Do not write timesheet rows yourself.`,
+        });
+        roundTimer.end('force_timesheet_draft');
+        continue;
+      }
+
       roundTimer.end(`model_draft chars=${draft.length} tools=${toolResults.length}`);
       break;
     }
 
     // L6 — Synthesize from evidence when appropriate
-    let reply = draft || '(No response)';
-    if (shouldSynthesize(intent, toolResults)) {
+    let reply = verbatimReply || draft || '(No response)';
+    if (verbatimReply) {
+      // Already the final, deterministic text — synthesis would truncate/paraphrase it.
+    } else if (shouldSynthesize(intent, toolResults)) {
       try {
         const synthesized = await synthesize({
           userText: text,
@@ -770,7 +858,9 @@ async function handleUserMessage({ text, discord }) {
     }
 
     // L7 — Verify
-    const claimCheck = replyGuard.checkReplyGrounding(reply, toolResults, evidence);
+    const claimCheck = verbatimReply
+      ? { ok: true }
+      : replyGuard.checkReplyGrounding(reply, toolResults, evidence);
     if (!claimCheck.ok) {
       console.warn('[claim-gate]', claimCheck.reason);
       reply = await repairUngroundedReply(messages, reply, toolResults, evidence);

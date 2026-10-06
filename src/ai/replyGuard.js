@@ -20,6 +20,7 @@ const WRITE_TOOLS = new Set([
   'memory_append',
   'memory_write',
   'clear_context',
+  'clear_chat',
   'cancel_pending',
   'wf_release_execute_pending',
 ]);
@@ -90,7 +91,7 @@ function hasSuccessfulWrite(toolResults) {
     if (name === 'memory_append' || name === 'memory_write') {
       return /Appended to org memory|Wrote org memory|ok/i.test(r) && !/^Error:/i.test(r);
     }
-    if (name === 'clear_context') return /cleared/i.test(r);
+    if (name === 'clear_context' || name === 'clear_chat') return /cleared|deleted/i.test(r);
     if (name === 'cancel_pending') return /Cancelled/i.test(r);
     return false;
   });

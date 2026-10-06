@@ -56,9 +56,9 @@ function uniqueModels(primary) {
 /**
  * Chat completion with optional tools.
  * On HTTP 429: rotate through remaining API keys, then retry with FALLBACK_MODEL.
- * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, model?: string, temperature?: number }} opts
+ * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, model?: string, temperature?: number, responseFormat?: object }} opts
  */
-async function chat({ messages, tools, toolChoice, model = DEFAULT_MODEL, temperature = 0.2 }) {
+async function chat({ messages, tools, toolChoice, model = DEFAULT_MODEL, temperature = 0.2, responseFormat }) {
   const pool = getClients();
   const models = uniqueModels(model);
 
@@ -66,6 +66,7 @@ async function chat({ messages, tools, toolChoice, model = DEFAULT_MODEL, temper
     messages,
     temperature,
   };
+  if (responseFormat) bodyBase.response_format = responseFormat;
   if (tools?.length) {
     bodyBase.tools = tools;
     bodyBase.tool_choice = toolChoice || 'auto';

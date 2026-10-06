@@ -6,9 +6,12 @@ const FIELD_KEYS = [
   'repository',
   'component',
   'developer',
+  'feature_group',
+  'submission_date',
   'source_pr',
   'source_branch',
   'merge_commit',
+  'github_link',
   'previous_version',
   'next_version',
   'development_ticket',
@@ -16,6 +19,8 @@ const FIELD_KEYS = [
   'deployment_ticket',
   'release_summary',
   'technical_summary',
+  'software_stack_changes',
+  'snyk_security',
   'rollback_plan',
   'risk',
   'security',
@@ -80,23 +85,13 @@ function listUnresolved(ctx) {
         'monitoring_owner',
         'release_summary',
         'technical_summary',
+        'feature_group',
+        'software_stack_changes',
+        'snyk_security',
       ].includes(key);
     }
     return isUnresolved(entry) && entry.value !== SKIPPED;
   });
-}
-
-function formatFieldReview(ctx) {
-  const lines = [];
-  for (const key of FIELD_KEYS) {
-    const entry = ctx.fields?.[key];
-    const value = entry?.value ?? ctx.release?.[key] ?? UNKNOWN;
-    const confidence = entry?.confidence ?? (ctx.release?.[key] != null ? 'high' : 'low');
-    const source = entry?.source ?? (ctx.release?.[key] != null ? 'context' : 'unknown');
-    lines.push(`${key}: ${value}`);
-    lines.push(`  confidence=${confidence} source=${source}`);
-  }
-  return lines.join('\n');
 }
 
 module.exports = {
@@ -108,5 +103,4 @@ module.exports = {
   markSkipped,
   isUnresolved,
   listUnresolved,
-  formatFieldReview,
 };

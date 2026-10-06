@@ -1,4 +1,4 @@
-const { createGithubClient } = require('../integrations/githubClient');
+const { createGithubClient, parseRepo, parseGithubUrl } = require('../integrations/githubClient');
 
 const DEFAULT_MAX = 10;
 const HARD_MAX = 50;
@@ -20,16 +20,31 @@ async function githubSearchPrsTask(payload = {}) {
 
   const github = createGithubClient();
   let query = String(payload.query || payload.q || '').trim();
-  const repoFull =
+  const fromQueryUrl = parseGithubUrl(query);
+  if (fromQueryUrl?.kind === 'pull' && fromQueryUrl.full_name && fromQueryUrl.number) {
+    query = `repo:${fromQueryUrl.full_name} ${fromQueryUrl.number}`.trim();
+  } else if (fromQueryUrl?.full_name) {
+    query = '';
+  }
+
+  let repoFull =
     payload.repo ||
-    (payload.owner && payload.name ? `${payload.owner}/${payload.name}` : null);
+    payload.url ||
+    (payload.owner && payload.name ? `${payload.owner}/${payload.name}` : null) ||
+    fromQueryUrl?.full_name;
+  if (repoFull) {
+    try {
+      const parsed = parseRepo(repoFull);
+      repoFull = `${parsed.owner}/${parsed.repo}`;
+    } catch {
+      repoFull = fromQueryUrl?.full_name || repoFull;
+    }
+  }
   const state = payload.state ? String(payload.state).trim().toLowerCase() : '';
 
   // If only repo given (no free-text query), list that repo's pulls via REST
   if (repoFull && !query) {
-    const m = String(repoFull).match(/^([^/\s]+)\/([^/\s]+)$/);
-    if (!m) throw new Error('repo must be owner/repo');
-    const [owner, repo] = [m[1], m[2]];
+    const { owner, repo } = parseRepo(repoFull);
     const pulls = await github.listPulls({
       owner,
       repo,

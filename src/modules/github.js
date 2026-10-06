@@ -6,6 +6,7 @@ const githubCreateTagTask = require('../tasks/githubCreateTag');
 const githubSearchPrsTask = require('../tasks/githubSearchPrs');
 const githubGetPrTask = require('../tasks/githubGetPr');
 const githubMonthlyActivityTask = require('../tasks/githubMonthlyActivity');
+const { parseGithubUrl } = require('../integrations/githubClient');
 const { looksLikeMonthlyActivity } = require('../util/monthRange');
 const { stageOrExecute } = require('../util/mutatingGate');
 const { envelopeFromRaw } = require('../util/taskResult');
@@ -33,6 +34,7 @@ async function runLocalTask(name, execute, format, payload = {}) {
 function looksLikeGithub(text) {
   const t = String(text || '');
   return (
+    Boolean(parseGithubUrl(t)) ||
     /\b(github|gh\b)\b/i.test(t) ||
     /\b(repos?|repositories)\b/i.test(t) ||
     /\b(pull requests?|\bPRs?\b)\b/i.test(t) ||
@@ -40,6 +42,19 @@ function looksLikeGithub(text) {
     /\bcommits?\b/i.test(t) ||
     /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+\b/.test(t)
   );
+}
+
+function intentFromGithubUrl(ghUrl) {
+  if (!ghUrl || ghUrl.kind === 'site') return null;
+  return {
+    domain: 'github',
+    mode: 'lookup',
+    budget: 'fast',
+    confidence: 'high',
+    reason: 'github-url',
+    forceGithub: true,
+    githubUrl: ghUrl,
+  };
 }
 
 registry.register({
@@ -63,27 +78,32 @@ registry.register({
       };
     }
 
+    const ghUrl = parseGithubUrl(t);
+    const mutate = /\b(create|make|add|push)\b.{0,40}\btag\b/i.test(t);
+    const fromUrl = !mutate ? intentFromGithubUrl(ghUrl) : null;
+    if (fromUrl) return fromUrl;
+
     // Prefer explicit github / PR / tag / repo language over generic "repo"
     const strong =
       /\b(github|gh\b|pull requests?|\bPRs?\b|git\s+tags?|create\s+tag|list\s+repos?|search\s+repos?)\b/i.test(
         t
       ) || /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+\b/.test(t);
 
-    if (!strong && !/\b(github|gh\b)\b/i.test(t)) {
+    if (!strong && !/\b(github|gh\b)\b/i.test(t) && !ghUrl) {
       // "repos" alone is weak — only claim github if paired with search/list/tag
       if (!/\b(search|list|find|show|check|create).{0,40}\b(repos?|tags?)\b/i.test(t)) {
         return null;
       }
     }
 
-    const mutate = /\b(create|make|add|push)\b.{0,40}\btag\b/i.test(t);
     return {
       domain: 'github',
       mode: mutate ? 'mutate' : 'lookup',
       needsConfirm: mutate,
       budget: 'fast',
-      confidence: strong ? 'high' : 'medium',
+      confidence: strong || ghUrl ? 'high' : 'medium',
       reason: mutate ? 'github-mutate' : 'github-lookup',
+      githubUrl: ghUrl || undefined,
     };
   },
 
@@ -92,7 +112,7 @@ registry.register({
       type: 'function',
       function: {
         name: 'github_search_repos',
-        description: 'Search GitHub repositories by query (name, topic, language, user:, org:, etc.).',
+        description: 'Search GitHub repositories by query (name, topic, language, user:, org:, repo:owner/name, or a github.com URL).',
         parameters: {
           type: 'object',
           properties: {
@@ -134,7 +154,7 @@ registry.register({
         parameters: {
           type: 'object',
           properties: {
-            repo: { type: 'string', description: 'owner/repo' },
+            repo: { type: 'string', description: 'owner/repo or a github.com URL' },
             owner: { type: 'string' },
             tag: { type: 'string', description: 'Optional tag name to check existence' },
             max: { type: 'integer', description: 'Max tags to list (default 30)' },
@@ -152,7 +172,7 @@ registry.register({
         parameters: {
           type: 'object',
           properties: {
-            repo: { type: 'string', description: 'owner/repo' },
+            repo: { type: 'string', description: 'owner/repo or a github.com URL' },
             tag: { type: 'string', description: 'Tag name (e. for example v1.2.0)' },
             sha: { type: 'string', description: 'Commit SHA (optional if branch/ref given)' },
             branch: { type: 'string', description: 'Branch or ref to tag (default HEAD)' },
@@ -172,7 +192,7 @@ registry.register({
           type: 'object',
           properties: {
             query: { type: 'string', description: 'PR search query (type:pr added automatically)' },
-            repo: { type: 'string', description: 'owner/repo — list or scope search' },
+            repo: { type: 'string', description: 'owner/repo or a github.com URL — list or scope search' },
             state: { type: 'string', description: 'open | closed | merged | all' },
             max: { type: 'integer', description: 'Max results (default 10)' },
           },
@@ -216,14 +236,15 @@ registry.register({
       type: 'function',
       function: {
         name: 'github_get_pr',
-        description: 'Read a single pull request by repo and number (title, body, state, diff stats).',
+        description:
+          'Read a single pull request by repo and number (title, body, state, diff stats). Prefer this over web_fetch_page for github.com/…/pull/N links; repo may be owner/repo or a github.com URL.',
         parameters: {
           type: 'object',
           properties: {
-            repo: { type: 'string', description: 'owner/repo' },
-            number: { type: 'integer', description: 'PR number' },
+            repo: { type: 'string', description: 'owner/repo or a github.com pull/repo URL' },
+            number: { type: 'integer', description: 'PR number (optional if the github.com URL includes /pull/N)' },
           },
-          required: ['repo', 'number'],
+          required: ['repo'],
         },
       },
     },
@@ -332,7 +353,10 @@ registry.register({
     [
       'GitHub mode:',
       '- Use github_* tools for repos, tags, and PRs. Do not invent repo/PR data.',
-      '- Repo args are owner/repo (e.g. octocat/Hello-World).',
+      '- If the user gives a github.com link, use github_* tools (the GitHub client). Never web_fetch_page or scrape github.com.',
+      '- PR URLs (…/pull/N) → github_get_pr with owner/repo and number (the URL itself is also accepted).',
+      '- Repo URLs → github_search_repos (query repo:owner/name) or github_list_tags as relevant.',
+      '- Repo args are owner/repo (e.g. octocat/Hello-World) or a github.com URL.',
       '- List my repos → github_list_repos. Search the catalog → github_search_repos.',
       '- Check/list tags → github_list_tags (set tag= to check existence).',
       '- Create tag → github_create_tag (gated when confirmation is on).',
@@ -355,6 +379,35 @@ registry.register({
     if (/\b(create|make|add|push)\b.{0,40}\btag\b/i.test(t)) {
       pushTool('github_create_tag', 'Create the requested git tag (propose if gated)');
       return;
+    }
+    const ghUrl = intent.githubUrl || parseGithubUrl(t);
+    if (ghUrl && ghUrl.kind !== 'site') {
+      if (ghUrl.kind === 'pull' && ghUrl.number) {
+        pushTool(
+          'github_get_pr',
+          `Fetch ${ghUrl.full_name}#${ghUrl.number} via the GitHub client`
+        );
+        return;
+      }
+      if (ghUrl.kind === 'tags' && ghUrl.full_name) {
+        pushTool('github_list_tags', `List tags on ${ghUrl.full_name} via the GitHub client`);
+        return;
+      }
+      if ((ghUrl.kind === 'org' || ghUrl.kind === 'user') && ghUrl.owner) {
+        pushTool('github_list_repos', `List repos for ${ghUrl.owner} via the GitHub client`);
+        return;
+      }
+      if (ghUrl.full_name && (ghUrl.kind === 'issue' || /\b(pr|pull)\b/i.test(t))) {
+        pushTool('github_search_prs', `Search PRs in ${ghUrl.full_name} via the GitHub client`);
+        return;
+      }
+      if (ghUrl.full_name) {
+        pushTool(
+          'github_search_repos',
+          `Look up ${ghUrl.full_name} via the GitHub client (not web fetch)`
+        );
+        return;
+      }
     }
     if (/\btags?\b/i.test(t) && /\b(list|check|show|get|what)\b/i.test(t)) {
       pushTool('github_list_tags', 'List or check tags on the repo');

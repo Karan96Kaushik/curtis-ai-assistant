@@ -1,41 +1,99 @@
 const fs = require('fs');
 const path = require('path');
 const { chat } = require('../../../integrations/groqClient');
-const { setField, markUnknown, markSkipped, listUnresolved, formatFieldReview, FIELD_KEYS } =
-  require('../fields');
+const { setField, markUnknown, listUnresolved, FIELD_KEYS } = require('../fields');
 const { audit, setState, STATES } = require('../context');
-const { warn } = require('../helpers');
+const { warn, jiraLink } = require('../helpers');
 const store = require('../store');
-const { isDraftMode, formatDraft } = require('../draft');
+const { formatDraft } = require('../draft');
+
+// Release-form generation spec (field definitions + rules for the LLM). Loaded once and
+// injected into the checklist-generation system prompt so the draft follows the org's
+// actual release-form conventions instead of a generic summary.
+const RELEASE_FORM_CONTEXT_PATH = path.join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'context',
+  'release-form-context.txt'
+);
+let releaseFormContextCache = null;
+function loadReleaseFormContext() {
+  if (releaseFormContextCache != null) return releaseFormContextCache;
+  try {
+    releaseFormContextCache = fs.readFileSync(RELEASE_FORM_CONTEXT_PATH, 'utf8');
+  } catch (err) {
+    releaseFormContextCache = '';
+  }
+  return releaseFormContextCache;
+}
 
 async function generateReleaseContext(ctx) {
   const r = ctx.release;
+
+  // Release Submission Date is deterministic — set once, not LLM-generated.
+  if (!r.submission_date) {
+    r.submission_date = new Date().toISOString().slice(0, 10);
+  }
+  setField(ctx, 'submission_date', r.submission_date, { confidence: 'high', source: 'system' });
+  if (r.github_link) {
+    setField(ctx, 'github_link', r.github_link, { confidence: 'high', source: 'github' });
+  }
+
+  // Gather ALL available context in one shot so the LLM can populate the entire
+  // draft's checklist/release-form fields together, instead of asking field-by-field.
   const evidence = {
     repository: r.repository,
     component: r.component,
+    github_link: r.github_link,
     pr: r.source_pr,
     pr_title: r.pr_title,
     pr_body: (r.pr_body || '').slice(0, 2000),
+    pr_merged: r.pr_merged,
+    ci_status: r.ci_status,
+    reviewers: r.reviewers,
     commits: (r.commits || []).slice(0, 20).map((c) => c.message?.split('\n')[0]),
+    changed_files: (r.changed_files || []).slice(0, 40),
     developer: r.developer,
     development_ticket: r.development_ticket,
+    development_issue_type: r.development_issue_type,
     jira_summary: ctx._jira_dev_summary,
+    jira_description: (ctx._jira_dev_description || '').slice(0, 1500),
+    jira_status: ctx._jira_dev_status,
     previous_version: r.previous_version,
     next_version: r.next_version,
-    changed_files: (r.changed_files || []).slice(0, 40),
+    version_bump: r.version_bump,
+    version_reason: r.version_reason,
+    tag_skipped: r.tag_skipped,
+    qa_ticket: r.qa_ticket,
+    deployment_ticket: r.deployment_ticket,
+    warnings: ctx.warnings,
   };
 
   let generated = null;
   try {
+    const formSpec = loadReleaseFormContext();
     const { message } = await chat({
       temperature: 0.2,
       messages: [
         {
           role: 'system',
-          content:
-            'You write release checklist fields from evidence only. Reply with JSON only: ' +
-            '{"release_summary","technical_summary","rollback_plan","risk","security","customer_impact","monitoring_owner"}. ' +
-            'Use null for unknowns. Do not invent ticket keys, versions, or URLs.',
+          content: [
+            'You are drafting a complete release plan/form. Given ALL of the context evidence below at once',
+            '(PR, Jira, commits, files, CI, version), write every release-form field in a single pass,',
+            'following the field definitions and generation rules in the release form specification below.',
+            '',
+            formSpec ? `RELEASE FORM SPECIFICATION:\n${formSpec.slice(0, 6000)}` : '',
+            '',
+            'Reply with JSON only: {"release_summary","technical_summary","feature_group",' +
+              '"software_stack_changes","snyk_security","rollback_plan","risk","security","customer_impact","monitoring_owner"}.',
+            'Use null when genuinely unknown or not applicable — the caller will substitute "N/A" or flag it for a human.',
+            'Do not invent ticket keys, versions, URLs, security-scan results, or approvals — use only the evidence given.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
         },
         {
           role: 'user',
@@ -62,6 +120,12 @@ async function generateReleaseContext(ctx) {
             .map((c) => `- ${c.message?.split('\n')[0]}`)
             .join('\n')
         : null),
+    feature_group: generated?.feature_group || 'N/A',
+    software_stack_changes: generated?.software_stack_changes || 'N/A',
+    // No Snyk integration exists yet — never let the LLM guess a scan result.
+    snyk_security:
+      generated?.snyk_security ||
+      'Not verified — no Snyk scan data available; manual check required before release.',
     rollback_plan:
       generated?.rollback_plan ||
       (r.previous_version ? `Redeploy ${r.previous_version}` : null),
@@ -87,6 +151,8 @@ async function generateReleaseContext(ctx) {
     'repository',
     'component',
     'developer',
+    'github_link',
+    'submission_date',
     'source_pr',
     'source_branch',
     'merge_commit',
@@ -97,65 +163,28 @@ async function generateReleaseContext(ctx) {
     'deployment_ticket',
   ]) {
     if (r[key] != null && r[key] !== '') {
+      // Don't overwrite a key this workflow already created in Jira.
+      if (ctx.fields?.[key]?.source === 'jira_create') continue;
       setField(ctx, key, r[key], { confidence: 'high', source: 'context' });
     }
   }
 
   audit(ctx, 'generate_release_context');
-  setState(ctx, STATES.RESOLVE_UNKNOWN_FIELDS);
-  return { continue: true };
-}
 
-async function resolveUnknownFields(ctx) {
+  // Surface unresolved fields in the draft instead of asking one by one —
+  // the user fixes them via wf_release_revise_draft during review.
   const unresolved = listUnresolved(ctx);
   ctx.unknown_fields = unresolved;
-
-  // Draft mode: don't block on one-by-one questions — surface unknowns in the draft
-  if (isDraftMode(ctx)) {
-    for (const key of unresolved) {
-      if (!ctx.fields?.[key] || ctx.fields[key].source === 'unknown') {
-        markUnknown(ctx, key);
-      }
+  for (const key of unresolved) {
+    if (!ctx.fields?.[key] || ctx.fields[key].source === 'unknown') {
+      markUnknown(ctx, key);
     }
-    setState(ctx, STATES.DRAFT_REVIEW);
-    audit(ctx, 'draft_ready');
-    return {
-      pause: 'draft',
-      message: formatDraft(ctx),
-    };
   }
-
-  if (!unresolved.length) {
-    setState(ctx, STATES.REVIEW_RELEASE);
-    return {
-      pause: 'review',
-      message: formatReviewMessage(ctx),
-    };
-  }
-
-  const field = unresolved[0];
-  const suggestion = ctx.fields?.[field]?.value;
-  const prompts = {
-    rollback_plan: `Suggested rollback: ${suggestion && suggestion !== 'Unknown' ? suggestion : `Redeploy ${ctx.release.previous_version || 'previous tag'}`} — Accept, provide value, or skip?`,
-    risk: `Suggested risk: ${suggestion && suggestion !== 'Unknown' ? suggestion : 'Low'} — Accept, provide value, or skip?`,
-    security: 'Security notes unknown. Provide value or skip?',
-    customer_impact: 'Customer impact unknown. Provide value or skip?',
-    monitoring_owner: `Monitoring owner? Suggested: ${ctx.release.developer || 'n/a'} — Accept, provide, or skip?`,
-    release_summary: 'Release summary missing. Provide text or skip?',
-    technical_summary: 'Technical summary missing. Provide text or skip?',
-  };
-
-  ctx.user_prompt = {
-    field,
-    prompt: prompts[field] || `${field} is unknown. Provide a value or skip.`,
-    suggestion: suggestion && suggestion !== 'Unknown' ? suggestion : null,
-  };
-
-  audit(ctx, 'ask_unknown_field', { field });
+  setState(ctx, STATES.DRAFT_REVIEW);
+  audit(ctx, 'draft_ready');
   return {
-    pause: 'user_input',
-    question: ctx.user_prompt,
-    message: ctx.user_prompt.prompt,
+    pause: 'draft',
+    message: formatDraft(ctx),
   };
 }
 
@@ -164,32 +193,6 @@ async function draftReview(ctx) {
   return {
     pause: 'draft',
     message: formatDraft(ctx),
-  };
-}
-
-function formatReviewMessage(ctx) {
-  return [
-    `Release review — workflow ${ctx.workflow.id}`,
-    `State: ${ctx.workflow.state}`,
-    '',
-    formatFieldReview(ctx),
-    '',
-    ctx.warnings?.length ? `Warnings:\n${ctx.warnings.map((w) => `- ${w}`).join('\n')}` : '',
-    '',
-    'Edit fields with wf_release_edit, or approve with wf_release_approve_review.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-async function reviewRelease(ctx) {
-  if (isDraftMode(ctx)) {
-    return draftReview(ctx);
-  }
-  setState(ctx, STATES.REVIEW_RELEASE);
-  return {
-    pause: 'review',
-    message: formatReviewMessage(ctx),
   };
 }
 
@@ -229,6 +232,15 @@ async function validate(ctx) {
   return { continue: true, message: `Validation passed with ${(ctx.warnings || []).length} warning(s).` };
 }
 
+// Reviewer roles from the org's release-form template. Status/comments/date/name are only
+// ever filled from actual review evidence — never fabricated (see release-form-context.txt).
+const REVIEW_ROLES = [
+  { role: 'Any' },
+  { role: 'Dev Lead (Atakan)' },
+  { role: 'Functional Lead (Henry)' },
+  { role: 'Release Lead (Pranab)' },
+];
+
 async function exportArtifacts(ctx) {
   const r = ctx.release;
   const dir = store.RELEASES_DIR;
@@ -239,9 +251,20 @@ async function exportArtifacts(ctx) {
     '',
     ...FIELD_KEYS.map((key) => {
       const entry = ctx.fields?.[key];
-      const value = entry?.value ?? r[key] ?? 'Unknown';
+      let value = entry?.value ?? r[key] ?? 'Unknown';
+      if (
+        ['development_ticket', 'qa_ticket', 'deployment_ticket'].includes(key) &&
+        value &&
+        value !== 'Unknown'
+      ) {
+        value = jiraLink(value);
+      }
       return `- **${key}**: ${value} _(confidence=${entry?.confidence || '?'}, source=${entry?.source || '?'})_`;
     }),
+    '',
+    '## Review metadata',
+    '_Status/comments/date/name are left blank unless there is actual reviewer evidence — never fabricated._',
+    ...REVIEW_ROLES.map((rev) => `- **${rev.role}**: Status=Pending, Reviewer Name=—, Comments=—, Date=—`),
     '',
     '## Warnings',
     ...(ctx.warnings || []).map((w) => `- ${w}`),
@@ -256,15 +279,22 @@ async function exportArtifacts(ctx) {
     '## Technical',
     r.technical_summary || '',
     '',
+    '## Software stack changes',
+    r.software_stack_changes || 'N/A',
+    '',
     '## Customer impact',
     r.customer_impact || 'n/a',
     '',
+    `Component: ${r.component || 'n/a'}`,
+    `Feature group: ${r.feature_group || 'N/A'}`,
     `Repository: ${r.repository}`,
+    `GitHub: ${r.github_link || 'n/a'}`,
     `Tag: ${r.next_version}`,
     `PR: ${r.source_pr || 'n/a'}`,
-    `Dev: ${r.development_ticket || 'n/a'}`,
-    `QA: ${r.qa_ticket || 'n/a'}`,
-    `Deploy: ${r.deployment_ticket || 'n/a'}`,
+    `Dev: ${jiraLink(r.development_ticket) || 'n/a'}`,
+    `QA: ${jiraLink(r.qa_ticket) || 'n/a'}`,
+    `Deploy: ${jiraLink(r.deployment_ticket) || 'n/a'}`,
+    `Submitted: ${r.submission_date || 'n/a'}`,
   ].join('\n');
 
   const deploymentSummary = [
@@ -272,6 +302,8 @@ async function exportArtifacts(ctx) {
     '',
     `Rollback: ${r.rollback_plan || 'n/a'}`,
     `Risk: ${r.risk || 'n/a'}`,
+    `Release security: ${r.security || 'n/a'}`,
+    `Snyk security: ${r.snyk_security || 'n/a'}`,
     `Monitoring owner: ${r.monitoring_owner || 'n/a'}`,
     `Merge commit: ${r.merge_commit || 'n/a'}`,
     `CI: ${r.ci_status || 'unknown'}`,
@@ -300,8 +332,9 @@ async function exportArtifacts(ctx) {
     message: [
       `Release workflow complete: ${ctx.workflow.id}`,
       `Tag: ${r.next_version}`,
-      `QA: ${r.qa_ticket || 'n/a'}`,
-      `Deploy: ${r.deployment_ticket || 'n/a'}`,
+      `Dev: ${jiraLink(r.development_ticket) || 'n/a'}`,
+      `QA: ${jiraLink(r.qa_ticket) || 'n/a'}`,
+      `Deploy: ${jiraLink(r.deployment_ticket) || 'n/a'}`,
       '',
       'Artifacts:',
       `- ${paths.checklist}`,
@@ -340,14 +373,8 @@ async function recover(ctx) {
 
 module.exports = {
   generateReleaseContext,
-  resolveUnknownFields,
-  reviewRelease,
   draftReview,
   validate,
   exportArtifacts,
   recover,
-  formatReviewMessage,
-  markSkipped,
-  setField,
-  listUnresolved,
 };

@@ -4,7 +4,7 @@ const { proposeNextVersion } = require('../semver');
 const { setField, markUnknown } = require('../fields');
 const { audit, setState, STATES } = require('../context');
 const { parseStartInput, warn, componentFromRepo, ticketSummary, JIRA_KEY_RE } = require('../helpers');
-const { isDraftMode, upsertDraftStep } = require('../draft');
+const { upsertDraftStep } = require('../draft');
 
 async function identifySource(ctx) {
   const r = ctx.release;
@@ -72,6 +72,7 @@ async function readGithub(ctx) {
       r.pr_merged = Boolean(pr.merged);
       r.developer = r.developer || pr.user?.login || null;
       r.reviewers = (pr.requested_reviewers || []).map((u) => u.login).filter(Boolean);
+      r._pr_html_url = pr.html_url || null;
 
       try {
         const commits = await gh.listPullCommits({ owner, repo, number: r.source_pr });
@@ -130,6 +131,17 @@ async function readGithub(ctx) {
       setField(ctx, 'component', r.component, { confidence: 'high', source: 'repository' });
       setField(ctx, 'repository', `${owner}/${repo}`, { confidence: 'high', source: 'github' });
       r.repository = `${owner}/${repo}`;
+
+      // GitHub link: prefer the PR, then a source branch/commit, then the repo itself.
+      r.github_link =
+        r._pr_html_url ||
+        (r.source_pr ? `https://github.com/${owner}/${repo}/pull/${r.source_pr}` : null) ||
+        (r.merge_commit ? `https://github.com/${owner}/${repo}/commit/${r.merge_commit}` : null) ||
+        (r.source_branch
+          ? `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(r.source_branch)}`
+          : null) ||
+        `https://github.com/${owner}/${repo}`;
+      setField(ctx, 'github_link', r.github_link, { confidence: 'high', source: 'github' });
     }
 
     // Extract Jira key from PR title/body/commits if missing
@@ -177,7 +189,7 @@ async function readJira(ctx) {
           const { issues } = await jira.searchIssues({
             jql,
             maxResults: 5,
-            fields: ['summary', 'status', 'issuetype', 'project', 'assignee', 'description', 'issuelinks'],
+            fields: ['summary', 'status', 'issuetype', 'project', 'assignee', 'description'],
           });
           if (issues?.length) {
             r.development_ticket = issues[0].key;
@@ -207,7 +219,6 @@ async function readJira(ctx) {
         'project',
         'assignee',
         'description',
-        'issuelinks',
         'resolution',
         'parent',
       ],
@@ -225,28 +236,6 @@ async function readJira(ctx) {
     });
     if (r.developer) {
       setField(ctx, 'developer', r.developer, { confidence: 'high', source: 'jira_assignee' });
-    }
-
-    // Reuse linked QA / Deploy tickets if present
-    const links = f.issuelinks || [];
-    for (const link of links) {
-      const other = link.outwardIssue || link.inwardIssue;
-      if (!other?.key) continue;
-      const summary = String(other.fields?.summary || other.key).toLowerCase();
-      if (!r.qa_ticket && (/\[qa\]/.test(summary) || /\bqa\b/.test(summary))) {
-        r.qa_ticket = other.key;
-        setField(ctx, 'qa_ticket', other.key, { confidence: 'high', source: 'jira_link' });
-      }
-      if (
-        !r.deployment_ticket &&
-        (/\[deploy/.test(summary) || /\bdeploy/.test(summary))
-      ) {
-        r.deployment_ticket = other.key;
-        setField(ctx, 'deployment_ticket', other.key, {
-          confidence: 'high',
-          source: 'jira_link',
-        });
-      }
     }
 
     ctx._jira_dev_summary = f.summary || null;
@@ -317,15 +306,13 @@ async function determineVersion(ctx) {
     r.tag_skipped = true;
     warn(ctx, 'Tag creation skipped by user request');
     audit(ctx, 'skip_tag', { next_version: r.next_version });
-    if (isDraftMode(ctx)) {
-      upsertDraftStep(ctx, {
-        type: 'create_tag',
-        title: 'Create Git tag',
-        description: `Skip creating a Git tag. Version ${r.next_version} is still used for ticket titles.`,
-        skip: true,
-        payload: null,
-      });
-    }
+    upsertDraftStep(ctx, {
+      type: 'create_tag',
+      title: 'Create Git tag',
+      description: `Skip creating a Git tag. Version ${r.next_version} is still used for ticket titles.`,
+      skip: true,
+      payload: null,
+    });
     setState(ctx, STATES.CREATE_QA_TICKET);
     return {
       continue: true,
@@ -343,43 +330,19 @@ async function determineVersion(ctx) {
     previous_version: r.previous_version,
   };
 
-  if (isDraftMode(ctx)) {
-    upsertDraftStep(ctx, {
-      type: 'create_tag',
-      title: 'Create Git tag',
-      description: [
-        `Create annotated tag \`${payload.tag}\` on \`${payload.repo}\` at commit \`${payload.sha || '?'}\`.`,
-        `Bump: ${payload.bump} (${payload.reason}).`,
-        payload.previous_version ? `Previous tag: ${payload.previous_version}.` : 'No previous stable tag found.',
-      ].join(' '),
-      payload,
-    });
-    audit(ctx, 'draft_plan_tag', payload);
-    setState(ctx, STATES.CREATE_QA_TICKET);
-    return { continue: true, message: `Draft: plan tag ${payload.tag}` };
-  }
-
-  ctx.pending_action = { type: 'create_tag', payload };
-  setState(ctx, STATES.WAITING_FOR_CONFIRMATION, { resume: STATES.CREATE_TAG });
-  audit(ctx, 'propose_tag', payload);
-
-  return {
-    pause: 'confirmation',
-    pendingArgs: {
-      workflowId: ctx.workflow.id,
-      type: 'create_tag',
-      payload,
-    },
-    message: [
-      `Version proposal for ${r.repository || 'repo'}:`,
-      `- Previous: ${r.previous_version || '(none)'}`,
-      `- Suggested: ${r.next_version} (${r.version_bump})`,
-      `- Reason: ${r.version_reason}`,
-      `- SHA: ${r.merge_commit || '(missing)'}`,
-      '',
-      'Confirm to create the Git tag, skip to continue without tagging, or cancel.',
-    ].join('\n'),
-  };
+  upsertDraftStep(ctx, {
+    type: 'create_tag',
+    title: 'Create Git tag',
+    description: [
+      `Create annotated tag \`${payload.tag}\` on \`${payload.repo}\` at commit \`${payload.sha || '?'}\`.`,
+      `Bump: ${payload.bump} (${payload.reason}).`,
+      payload.previous_version ? `Previous tag: ${payload.previous_version}.` : 'No previous stable tag found.',
+    ].join(' '),
+    payload,
+  });
+  audit(ctx, 'draft_plan_tag', payload);
+  setState(ctx, STATES.CREATE_QA_TICKET);
+  return { continue: true, message: `Draft: plan tag ${payload.tag}` };
 }
 
 function fail(ctx, err, tool) {

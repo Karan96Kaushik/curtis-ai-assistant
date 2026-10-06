@@ -61,10 +61,6 @@ function parseStartInput(input = {}) {
       input.skipTag === true ||
       /\bskip\s+(the\s+)?(git\s+)?tag\b/i.test(text) ||
       /\bwithout\s+(a\s+)?tag\b/i.test(text),
-    draft:
-      input.draft === true ||
-      input.mode === 'draft' ||
-      /\bdraft\b/i.test(text),
   };
 }
 
@@ -79,10 +75,24 @@ function componentFromRepo(repository) {
   return parts[1] || parts[0] || null;
 }
 
+/**
+ * Display text for a Jira ticket: "KEY (https://…/browse/KEY)".
+ * Falls back to the bare key when JIRA_BASE_URL is not configured.
+ */
+function jiraLink(key) {
+  if (!key) return null;
+  const k = String(key).trim().toUpperCase();
+  const base = String(process.env.JIRA_BASE_URL || '').replace(/\/$/, '');
+  return base ? `${k} (${base}/browse/${k})` : k;
+}
+
 function ticketSummary(prefix, ctx) {
   const ver = ctx.release.next_version || 'TBD';
   const component = ctx.release.component || ctx.release.repository || 'release';
-  return `[${prefix}] Release ${ver} — ${component}`;
+  if (prefix === 'QA') {
+    return `TEST ${component} ${ver}`;
+  }
+  return `Deploy ${component} ${ver} to Prod`;
 }
 
 /**
@@ -118,6 +128,7 @@ module.exports = {
   parseStartInput,
   warn,
   componentFromRepo,
+  jiraLink,
   ticketSummary,
   resolveCreateTicketType,
   JIRA_KEY_RE,

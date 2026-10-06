@@ -1,4 +1,4 @@
-const { createGithubClient, GithubError, parseRepo } = require('../integrations/githubClient');
+const { createGithubClient, GithubError, parseRepo, parseGithubUrl } = require('../integrations/githubClient');
 
 /**
  * Read a single pull request.
@@ -8,7 +8,11 @@ const { createGithubClient, GithubError, parseRepo } = require('../integrations/
  * }} payload
  */
 async function githubGetPrTask(payload = {}) {
-  const number = payload.number ?? payload.pr ?? payload.pull ?? payload.pull_number;
+  const urlHint = parseGithubUrl(
+    payload.url || payload.link || payload.repo || payload.repository || ''
+  );
+  const number =
+    payload.number ?? payload.pr ?? payload.pull ?? payload.pull_number ?? urlHint?.number;
   if (number == null || number === '') {
     throw new Error('Missing PR number');
   }
@@ -16,9 +20,12 @@ async function githubGetPrTask(payload = {}) {
   const full =
     payload.repo ||
     payload.repository ||
-    (payload.owner && payload.name ? `${payload.owner}/${payload.name}` : null);
+    payload.url ||
+    payload.link ||
+    (payload.owner && payload.name ? `${payload.owner}/${payload.name}` : null) ||
+    urlHint?.full_name;
   if (!full && !payload.owner) {
-    throw new Error('Missing repo (expected owner/repo)');
+    throw new Error('Missing repo (expected owner/repo or a github.com PR URL)');
   }
 
   const { owner, repo } = payload.owner && payload.repo && !String(payload.repo).includes('/')

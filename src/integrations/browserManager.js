@@ -1,5 +1,16 @@
 const axios = require('axios');
-const { chromium } = require('playwright');
+
+// Non-literal specifier keeps bundlers (the Amplify Lambda) from pulling in Playwright;
+// serverless runtimes only get fastFetch.
+const PLAYWRIGHT_MODULE = 'playwright';
+
+function loadChromium() {
+  try {
+    return require(PLAYWRIGHT_MODULE).chromium;
+  } catch {
+    throw new Error('Headless browser is not available in this runtime (Playwright is not installed).');
+  }
+}
 
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
@@ -54,6 +65,7 @@ class BrowserManager {
     let browser;
     let context;
     try {
+      const chromium = loadChromium();
       try {
         browser = await chromium.launch({
           headless: true,

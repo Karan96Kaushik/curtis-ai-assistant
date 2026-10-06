@@ -1,6 +1,7 @@
 const registry = require('../core/moduleRegistry');
 const webSearchTask = require('../tasks/webSearch');
 const webFetchPageTask = require('../tasks/webFetchPage');
+const { parseGithubUrl } = require('../integrations/githubClient');
 
 function executeTaskDetailed(name, payload) {
   return require('../discord/taskRunner').executeTaskDetailed(name, payload);
@@ -33,6 +34,10 @@ registry.register({
     if (travel) return null;
 
     const url = extractUrl(t);
+    if (parseGithubUrl(t) || (url && parseGithubUrl(url)) || (/\bgithub\.com\b/i.test(t) && !url)) {
+      return null;
+    }
+
     if (looksLikeOpenPage(t) || (url && /\b(open|text|page|content|read|fetch|scrape)\b/i.test(t))) {
       return {
         domain: 'web',
@@ -135,6 +140,7 @@ registry.register({
     return [
       'Web research mode:',
       '- Specific URL / "open … and give me text" → call web_fetch_page (NOT web_search).',
+      '- github.com URLs are GitHub, not web research — use github_* tools (the GitHub client), never web_fetch_page.',
       '- Open questions / "look up X" → web_search.',
       '- You DO have Playwright via web_fetch_page (mode=auto|browser). Never claim you cannot open pages.',
       '- Summarize page text for Discord; cite the URL from the tool result.',

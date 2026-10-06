@@ -41,6 +41,13 @@ function clear(channelId, userId) {
   store.delete(sessionKey(channelId, userId));
 }
 
+function clearChannel(channelId) {
+  const prefix = `${channelId}:`;
+  for (const key of store.keys()) {
+    if (key.startsWith(prefix)) store.delete(key);
+  }
+}
+
 /**
  * Take (get + clear) pending action if present and not expired.
  */
@@ -107,37 +114,16 @@ function buildSummary(tool, args) {
     return lines.join('\n');
   }
   if (tool === 'wf_release_execute_pending') {
-    const type = args.type || args.payload?.type || '?';
     const payload = args.payload || {};
+    const steps = (payload.steps || []).filter((s) => !s.skip && s.payload);
     const lines = [
-      'WF Release pending action',
+      'Execute release draft',
       `- Workflow: ${args.workflowId || '?'}`,
-      `- Type: ${type}`,
+      `- ${steps.length} write(s) will run in order:`,
     ];
-    if (type === 'create_tag') {
-      lines.push(`- Repo: ${payload.repo || '?'}`);
-      lines.push(`- Tag: ${payload.tag || '?'}`);
-      if (payload.sha) lines.push(`- SHA: ${payload.sha}`);
-      if (payload.reason) lines.push(`- Reason: ${payload.reason}`);
-    } else if (type === 'create_qa_ticket' || type === 'create_deployment_ticket') {
-      lines.push(`- Project: ${payload.projectKey || '?'}`);
-      lines.push(`- Type: ${payload.issueType || '?'}`);
-      if (payload.parentKey) lines.push(`- Parent: ${payload.parentKey}`);
-      lines.push(`- Summary: ${payload.summary || '?'}`);
-    } else if (type === 'execute_draft') {
-      const steps = payload.steps || [];
-      const writes = steps.filter((s) => !s.skip && !s.reuse && s.payload);
-      lines.push(`- Execute full draft (${writes.length} write(s))`);
-      for (const s of writes) {
-        lines.push(`  • ${s.title || s.type}`);
-      }
-    } else if (type === 'link_jira') {
-      lines.push(`- Link type: ${payload.type || 'Relates'}`);
-      for (const pair of payload.pairs || []) {
-        lines.push(`- ${pair.inwardKey} → ${pair.outwardKey}`);
-      }
-    } else {
-      lines.push(`- Payload: ${JSON.stringify(payload).slice(0, 400)}`);
+    for (const s of steps) {
+      const detail = s.payload?.summary || s.payload?.tag || '';
+      lines.push(`  • ${s.title || s.type}${detail ? ` — ${detail}` : ''}`);
     }
     return lines.join('\n');
   }
@@ -152,6 +138,7 @@ function domainFromTool(tool) {
   if (name.startsWith('teams_')) return 'teams';
   if (name.startsWith('browser_')) return 'browser';
   if (name.startsWith('wf_release_')) return 'release';
+  if (name === 'clear_chat' || name === 'clear_context') return 'meta';
   return 'chat';
 }
 
@@ -159,6 +146,7 @@ module.exports = {
   get,
   set,
   clear,
+  clearChannel,
   take,
   buildSummary,
   domainFromTool,

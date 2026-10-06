@@ -8,10 +8,12 @@ const { startTimer } = require('../src/util/timing');
 const config = require('../src/config');
 const scheduler = require('../src/core/scheduler');
 const extensionBridge = require('../src/integrations/extensionBridge');
+const discordGateway = require('../src/integrations/discordGateway');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APP_ID = process.env.DISCORD_APP_ID || process.env.DISCORD_CLIENT_ID;
-const BOT_PERMISSIONS = process.env.DISCORD_BOT_PERMISSIONS || '2147568640';
+// View Channel, Send Messages, Embed Links, Read Message History, Manage Messages, Use Slash Commands
+const BOT_PERMISSIONS = process.env.DISCORD_BOT_PERMISSIONS || '2147576832';
 const COMMAND_PREFIX = process.env.DISCORD_COMMAND_PREFIX || '!';
 const MESSAGE_COMMANDS_ENABLED = process.env.DISCORD_MESSAGE_COMMANDS !== '0';
 const AI_ENABLED = process.env.DISCORD_AI !== '0' && discordAgent.isConfigured();
@@ -35,6 +37,25 @@ const KNOWN_COMMANDS = new Set([
 function truncate(content) {
   const text = String(content);
   return text.length > 2000 ? `${text.slice(0, 1997)}...` : text;
+}
+
+/** Split on line boundaries into ≤2000-char messages, re-opening ``` fences across parts. */
+function splitForDiscord(content, limit = 1990) {
+  const parts = [];
+  let current = '';
+  let fence = null;
+  for (const line of String(content).split('\n')) {
+    const closing = fence ? '\n```' : '';
+    if (current && current.length + line.length + 1 + closing.length > limit) {
+      parts.push(current + closing);
+      current = fence ? `${fence}\n` : '';
+    }
+    current += (current && !current.endsWith('\n') ? '\n' : '') + line;
+    const trimmed = line.trim();
+    if (trimmed.startsWith('```')) fence = fence ? null : trimmed;
+  }
+  if (current) parts.push(current);
+  return parts.map(truncate);
 }
 
 function installUrl() {
@@ -64,6 +85,7 @@ function helpText() {
       'AI (Groq): mention me or DM with natural language, e.g.',
       '`@bot what are my open tickets?`',
       '`@bot comment on AATP-47 saying started`',
+      '`@bot clear the chat`',
       `Model: ${DEFAULT_MODEL}`
     );
   }
@@ -249,11 +271,16 @@ async function replyWorking(message) {
 async function finishReply(message, thinking, body) {
   const timer = startTimer('discord.finishReply');
   try {
-    const text = truncate(body);
+    const [text, ...rest] = splitForDiscord(body);
     if (thinking) {
-      await thinking.edit(text).catch(() => message.reply(text));
+      await thinking.edit(text).catch(() =>
+        message.reply(text).catch(() => message.channel.send(text).catch(() => null))
+      );
     } else {
-      await message.reply(text);
+      await message.reply(text).catch(() => message.channel.send(text).catch(() => null));
+    }
+    for (const part of rest) {
+      await message.channel.send(part).catch(() => null);
     }
   } finally {
     timer.end();
@@ -316,6 +343,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (readyClient) => {
+  discordGateway.setClient(readyClient);
   console.log(`Discord gateway connected as ${readyClient.user.tag}`);
   console.log(
     `REQUIRE_CONFIRMATION=${config.REQUIRE_CONFIRMATION} (toggle in src/config.js or env)`

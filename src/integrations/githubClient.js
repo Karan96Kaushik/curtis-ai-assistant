@@ -1,10 +1,129 @@
 class GithubError extends Error {
-  constructor(message, status, body) {
+  constructor(message, status, body, extras = {}) {
     super(message);
     this.name = 'GithubError';
     this.status = status;
     this.body = body;
+    this.rateLimited = Boolean(extras.rateLimited);
+    this.retryAfterMs = extras.retryAfterMs ?? null;
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Authenticated search is 30 req/min; space starts so we stay under that. */
+const SEARCH_MIN_INTERVAL_MS = 2100;
+const REST_MIN_INTERVAL_MS = 150;
+const REST_MAX_CONCURRENT = 2;
+const RATE_LIMIT_MAX_ATTEMPTS = 5;
+const SECONDARY_RATE_LIMIT_FLOOR_MS = 60_000;
+const RATE_LIMIT_CAP_MS = 5 * 60_000;
+
+/**
+ * Shared across client instances — GitHub rates the token, not the process.
+ * Search is serial; other REST is lightly concurrent with a small gap so we
+ * do not trip the secondary (abuse) limit.
+ */
+const searchLimiter = createLimiter({ maxConcurrent: 1, minIntervalMs: SEARCH_MIN_INTERVAL_MS });
+const restLimiter = createLimiter({ maxConcurrent: REST_MAX_CONCURRENT, minIntervalMs: REST_MIN_INTERVAL_MS });
+
+function createLimiter({ maxConcurrent, minIntervalMs }) {
+  let active = 0;
+  const waiting = [];
+  let lastStartedAt = 0;
+
+  function pump() {
+    while (active < maxConcurrent && waiting.length) {
+      active += 1;
+      waiting.shift()();
+    }
+  }
+
+  async function acquire() {
+    if (active >= maxConcurrent) {
+      await new Promise((resolve) => waiting.push(resolve));
+    } else {
+      active += 1;
+    }
+    const wait = lastStartedAt + minIntervalMs - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastStartedAt = Date.now();
+  }
+
+  function release() {
+    active -= 1;
+    pump();
+  }
+
+  return async function limit(fn) {
+    await acquire();
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
+}
+
+function isSearchPath(path) {
+  return /\/search\//.test(path);
+}
+
+function limiterFor(path) {
+  return isSearchPath(path) ? searchLimiter : restLimiter;
+}
+
+function rateLimitMessage(data) {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  return String(data.message || data.error || '');
+}
+
+function isRateLimited(status, data) {
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  const msg = rateLimitMessage(data).toLowerCase();
+  return msg.includes('rate limit') || msg.includes('abuse detection');
+}
+
+function parseRetryAfterMs(headers) {
+  const raw = headers.get('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(seconds, 1) * 1000;
+  const when = Date.parse(raw);
+  if (!Number.isNaN(when)) return Math.max(when - Date.now(), 1000);
+  return null;
+}
+
+function resetWaitMs(headers) {
+  const remaining = headers.get('x-ratelimit-remaining');
+  if (remaining == null || Number(remaining) > 0) return null;
+  const reset = Number(headers.get('x-ratelimit-reset'));
+  if (!Number.isFinite(reset)) return null;
+  return Math.max(reset * 1000 - Date.now(), 0) + 500;
+}
+
+function retryDelayMs(response, data, attempt) {
+  const msg = rateLimitMessage(data);
+  const secondary = /secondary rate limit/i.test(msg);
+  const floor = secondary ? SECONDARY_RATE_LIMIT_FLOOR_MS : 5_000;
+  const exponential = Math.min(floor * 2 ** attempt, RATE_LIMIT_CAP_MS);
+  return Math.max(
+    parseRetryAfterMs(response.headers) || 0,
+    resetWaitMs(response.headers) || 0,
+    exponential
+  );
+}
+
+/** Token-wide pause so a 403 secondary limit stops the rest of the burst. */
+let cooldownUntil = 0;
+
+async function waitForCooldown() {
+  const wait = cooldownUntil - Date.now();
+  if (wait > 0) await sleep(wait);
 }
 
 function requireEnv(name) {
@@ -17,8 +136,102 @@ function requireEnv(name) {
 
 const { startTimer } = require('../util/timing');
 
+const GITHUB_RESERVED_OWNERS = new Set([
+  'settings',
+  'notifications',
+  'issues',
+  'pulls',
+  'marketplace',
+  'explore',
+  'topics',
+  'orgs',
+  'organizations',
+  'users',
+  'search',
+  'login',
+  'signup',
+  'new',
+  'dashboard',
+  'gist',
+  'collections',
+  'sponsors',
+  'about',
+  'pricing',
+  'features',
+  'enterprise',
+  'team',
+  'solutions',
+  'resources',
+  'copilot',
+  'codespaces',
+  'security',
+  'apps',
+]);
+
 /**
- * Parse "owner/repo" or separate owner + repo into { owner, repo }.
+ * Parse a github.com link from free text.
+ * @param {string} text
+ * @returns {{
+ *   kind: 'repo'|'pull'|'issue'|'tags'|'commit'|'org'|'user'|'site',
+ *   owner: string|null,
+ *   repo: string|null,
+ *   full_name: string|null,
+ *   number?: number|null,
+ *   tag?: string|null,
+ *   sha?: string|null,
+ * } | null}
+ */
+function parseGithubUrl(text) {
+  const s = String(text || '');
+  const m = s.match(/(?:^|[\s<("'])(?:https?:\/\/)?(?:www\.)?github\.com\/([^\s<>)"']+)/i);
+  if (!m) return null;
+
+  const path = String(m[1] || '')
+    .replace(/[.,;:!?]+$/, '')
+    .replace(/\/+$/, '')
+    .split('?')[0]
+    .split('#')[0];
+  const parts = path.split('/').filter(Boolean);
+  if (!parts.length) return { kind: 'site', owner: null, repo: null, full_name: null };
+
+  if (parts[0].toLowerCase() === 'orgs' && parts[1]) {
+    return { kind: 'org', owner: parts[1], repo: null, full_name: null };
+  }
+
+  const owner = parts[0];
+  if (GITHUB_RESERVED_OWNERS.has(owner.toLowerCase())) {
+    return { kind: 'site', owner: null, repo: null, full_name: null };
+  }
+
+  const repo = parts[1] || null;
+  if (!repo) {
+    return { kind: 'user', owner, repo: null, full_name: null };
+  }
+
+  const restKind = (parts[2] || 'repo').toLowerCase();
+  const rest = parts.slice(3);
+  const full_name = `${owner}/${repo}`;
+
+  if (restKind === 'pull' || restKind === 'pulls') {
+    const number = rest[0] && /^\d+$/.test(rest[0]) ? Number(rest[0]) : null;
+    return { kind: 'pull', owner, repo, full_name, number };
+  }
+  if (restKind === 'issues') {
+    const number = rest[0] && /^\d+$/.test(rest[0]) ? Number(rest[0]) : null;
+    return { kind: 'issue', owner, repo, full_name, number };
+  }
+  if (restKind === 'releases' || restKind === 'tags') {
+    const tag = restKind === 'releases' && rest[0] === 'tag' ? rest[1] : rest[0];
+    return { kind: 'tags', owner, repo, full_name, tag: tag || null };
+  }
+  if (restKind === 'commit' || restKind === 'commits') {
+    return { kind: 'commit', owner, repo, full_name, sha: rest[0] || null };
+  }
+  return { kind: 'repo', owner, repo, full_name };
+}
+
+/**
+ * Parse "owner/repo", a github.com URL, or separate owner + repo into { owner, repo }.
  * @param {string} ownerOrFull
  * @param {string} [repo]
  * @returns {{ owner: string, repo: string }}
@@ -28,9 +241,13 @@ function parseRepo(ownerOrFull, repo) {
     return { owner: String(ownerOrFull).trim(), repo: String(repo).trim() };
   }
   const s = String(ownerOrFull || '').trim();
+  const fromUrl = parseGithubUrl(s);
+  if (fromUrl?.owner && fromUrl?.repo) {
+    return { owner: fromUrl.owner, repo: fromUrl.repo };
+  }
   const m = s.match(/^([^/\s]+)\/([^/\s]+)$/);
   if (!m) {
-    throw new Error('Expected repo as "owner/repo" or separate owner + repo');
+    throw new Error('Expected repo as "owner/repo", a github.com URL, or separate owner + repo');
   }
   return { owner: m[1], repo: m[2] };
 }
@@ -43,7 +260,7 @@ function createGithubClient(overrides = {}) {
     'https://api.github.com'
   ).replace(/\/$/, '');
 
-  async function request(method, path, body) {
+  async function requestOnce(method, path, body) {
     const url = path.startsWith('http') ? path : `${baseUrl}${path}`;
     const headers = {
       Authorization: `Bearer ${token}`,
@@ -74,15 +291,27 @@ function createGithubClient(overrides = {}) {
       }
 
       if (!response.ok) {
+        const rateLimited = isRateLimited(response.status, data);
         const detail =
           (data && typeof data === 'object' && (data.message || data.error)) ||
           (typeof data === 'string' ? data : response.statusText);
         let message = `GitHub ${method} ${path} failed (${response.status}): ${detail}`;
-        if (response.status === 401 || response.status === 403) {
+        if ((response.status === 401 || response.status === 403) && !rateLimited) {
           message += ' — check GITHUB_TOKEN in .env (scopes: repo for private, public_repo for public)';
         }
         timer.end(`status=${response.status} bytes=${text.length}`);
-        throw new GithubError(message, response.status, data);
+        throw new GithubError(message, response.status, data, {
+          rateLimited,
+          retryAfterMs: rateLimited ? retryDelayMs(response, data, 0) : null,
+        });
+      }
+
+      const exhausted = resetWaitMs(response.headers);
+      if (exhausted > 0) {
+        console.error(
+          `[github] primary rate limit exhausted, waiting ${Math.ceil(exhausted / 1000)}s before continuing`
+        );
+        await sleep(exhausted);
       }
 
       timer.end(`status=${response.status} bytes=${text.length}`);
@@ -92,6 +321,32 @@ function createGithubClient(overrides = {}) {
         timer.end('FAILED network/parse');
       }
       throw err;
+    }
+  }
+
+  async function request(method, path, body) {
+    const limit = limiterFor(path);
+    for (let attempt = 0; attempt < RATE_LIMIT_MAX_ATTEMPTS; attempt += 1) {
+      await waitForCooldown();
+      try {
+        return await limit(() => requestOnce(method, path, body));
+      } catch (err) {
+        const retryable = err instanceof GithubError && err.rateLimited;
+        if (!retryable || attempt >= RATE_LIMIT_MAX_ATTEMPTS - 1) throw err;
+        const wait = Math.max(
+          err.retryAfterMs || 0,
+          Math.min(
+            SECONDARY_RATE_LIMIT_FLOOR_MS * 2 ** attempt,
+            RATE_LIMIT_CAP_MS
+          )
+        );
+        cooldownUntil = Math.max(cooldownUntil, Date.now() + wait);
+        console.error(
+          `[github] rate limited on ${method} ${path}; waiting ${Math.ceil(wait / 1000)}s ` +
+            `(retry ${attempt + 1}/${RATE_LIMIT_MAX_ATTEMPTS - 1})`
+        );
+        await sleep(wait);
+      }
     }
   }
 
@@ -421,4 +676,5 @@ module.exports = {
   createGithubClient,
   GithubError,
   parseRepo,
+  parseGithubUrl,
 };

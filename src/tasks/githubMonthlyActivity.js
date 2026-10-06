@@ -4,21 +4,15 @@ const config = require('../config');
 
 const PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 10; // GitHub search caps at 1000 results
-const SEARCH_GAP_MS = 350; // stay under 30 search req/min
-const RETRY_STATUSES = new Set([403, 429]);
 const MAX_SCOPES = 8; // keep alias queries short enough for the search API
 const MAX_ALIASES = 5;
 const MAX_BRANCH_REPOS = 75;
 const MAX_BRANCHES_PER_REPO = 60;
 const MAX_COMMIT_PAGES = 3;
-const BRANCH_CONCURRENCY = 8;
+const BRANCH_CONCURRENCY = 2;
 
 function log(...args) {
   console.error('[github-monthly-activity]', ...args);
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function fmtStamp(iso) {
@@ -67,26 +61,14 @@ function dateInMonth(iso, start, end) {
   return d >= start && d <= end;
 }
 
-/** Paginate a search endpoint, retrying transient secondary rate limits. */
+/** Paginate a search endpoint. Rate limits are handled in the GitHub client. */
 async function searchAll(label, fetchPage, maxPages) {
   const items = [];
   let totalCount = null;
   let truncated = false;
 
   for (let page = 1; page <= maxPages; page += 1) {
-    let data;
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        data = await fetchPage(page);
-        break;
-      } catch (err) {
-        const retryable = err instanceof GithubError && RETRY_STATUSES.has(err.status);
-        if (!retryable || attempt >= 3) throw err;
-        const wait = 2000 * (attempt + 1);
-        log(`${label}: rate-limited, retrying in ${wait}ms`);
-        await sleep(wait);
-      }
-    }
+    const data = await fetchPage(page);
 
     totalCount = data.total_count ?? totalCount;
     const batch = data.items || [];
@@ -95,7 +77,6 @@ async function searchAll(label, fetchPage, maxPages) {
     if (!batch.length || batch.length < PAGE_SIZE) break;
     if (totalCount != null && items.length >= totalCount) break;
     if (page === maxPages) truncated = true;
-    else await sleep(SEARCH_GAP_MS);
   }
 
   if (totalCount != null && totalCount > items.length) truncated = true;
@@ -672,7 +653,6 @@ async function githubMonthlyActivityTask(payload = {}) {
     const res = await exec(query);
     totals[label] = res.totalCount;
     if (res.truncated) anyTruncated = true;
-    await sleep(SEARCH_GAP_MS);
     return res;
   };
 

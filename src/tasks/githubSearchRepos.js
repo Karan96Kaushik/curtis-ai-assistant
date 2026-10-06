@@ -1,4 +1,4 @@
-const { createGithubClient } = require('../integrations/githubClient');
+const { createGithubClient, parseGithubUrl } = require('../integrations/githubClient');
 
 const DEFAULT_MAX = 10;
 const HARD_MAX = 50;
@@ -8,7 +8,13 @@ const HARD_MAX = 50;
  * @param {{ query?: string, q?: string, max?: number|string, sort?: string, order?: string }} payload
  */
 async function githubSearchReposTask(payload = {}) {
-  const query = String(payload.query || payload.q || '').trim();
+  let query = String(payload.query || payload.q || payload.url || '').trim();
+  const fromUrl = parseGithubUrl(query);
+  if (fromUrl?.full_name) {
+    query = `repo:${fromUrl.full_name}`;
+  } else if (fromUrl?.owner && !fromUrl.repo) {
+    query = `user:${fromUrl.owner}`;
+  }
   if (!query) throw new Error('Missing search query');
 
   let max = Number(payload.max ?? payload.per_page);

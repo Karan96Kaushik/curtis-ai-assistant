@@ -48,7 +48,7 @@ function toolsForIntent(intent, opts = {}) {
   const confirmOn = opts.confirmOn !== false;
   const hasPending = Boolean(opts.hasPending);
 
-  const allowed = new Set(['clear_context', 'think', 'memory_read']);
+  const allowed = new Set(['clear_context', 'clear_chat', 'think', 'memory_read']);
 
   if (confirmOn && (hasPending || intent.mode === 'confirm' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release')) {
     allowed.add('confirm_pending');
@@ -115,7 +115,8 @@ function toolsForIntent(intent, opts = {}) {
   if (
     intent.domain === 'github' ||
     intent.domain === 'mixed' ||
-    intent.forceGithubMonthlyActivity
+    intent.forceGithubMonthlyActivity ||
+    intent.forceGithub
   ) {
     allowed.add('github_search_repos');
     allowed.add('github_list_repos');
@@ -135,14 +136,13 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('wf_release_approve_draft');
     allowed.add('wf_release_status');
     allowed.add('wf_release_advance');
-    allowed.add('wf_release_skip');
-    allowed.add('wf_release_revise_pending');
-    allowed.add('wf_release_answer');
-    allowed.add('wf_release_edit');
-    allowed.add('wf_release_approve_review');
     if (intent.mode === 'mutate' || intent.mode === 'confirm' || hasPending) {
       allowed.add('wf_release_execute_pending');
     }
+  }
+
+  if (intent.domain === 'timesheet' || intent.forceTimesheet) {
+    allowed.add('timesheet_draft');
   }
 
   if (intent.domain === 'teams' || intent.domain === 'mixed') {
@@ -184,6 +184,7 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('github_search_prs');
     allowed.add('github_get_pr');
     allowed.add('github_monthly_activity');
+    allowed.add('timesheet_draft');
   }
 
   return allTools.filter(t => allowed.has(t.function.name));

@@ -55,6 +55,37 @@ class ModuleRegistry {
     }
   }
 
+  /**
+   * Remove a registered module and everything it contributed.
+   * @param {string} id
+   * @returns {boolean} true when the module was registered
+   */
+  unregister(id) {
+    const mod = this.modules.get(id);
+    if (!mod) return false;
+    this.modules.delete(id);
+
+    for (const tool of mod.tools || []) {
+      this.tools.delete(tool.function.name);
+    }
+    for (const name of Object.keys(mod.toolHandlers || {})) {
+      this.toolHandlers.delete(name);
+    }
+    for (const name of Object.keys(mod.tasks || {})) {
+      this.tasks.delete(name);
+      this.taskFormatters.delete(name);
+    }
+    const drop = (list, fn) => {
+      const i = list.indexOf(fn);
+      if (i !== -1) list.splice(i, 1);
+    };
+    if (mod.intent) drop(this.intentMatchers, mod.intent);
+    if (mod.buildPlan) drop(this.planBuilders, mod.buildPlan);
+    if (mod.evidenceExtractor) drop(this.evidenceExtractors, mod.evidenceExtractor);
+    this.promptPacks.delete(mod.id);
+    return true;
+  }
+
   getTools() {
     return Array.from(this.tools.values());
   }

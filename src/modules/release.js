@@ -63,8 +63,21 @@ function looksLikeRevisePending(text) {
   return (
     /\b(use|change|set|update|rename)\s+(the\s+)?(title|summary|tag|version)\b/i.test(t) ||
     /\btitle\s*[:=]/i.test(t) ||
-    /\brevise\b/i.test(t)
+    /\brevise\b/i.test(t) ||
+    /\b(change|edit|update|revise|set|use)\b.{0,40}\b(qa|deploy|tag|version|checklist|rollback|risk|security|summary)\b/i.test(
+      t
+    ) ||
+    /\b(skip|remove)\s+(the\s+)?(git\s+)?tag\b/i.test(t)
   );
+}
+
+function looksLikeDraftRevision(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\bdraft\b/i.test(t) && /\b(change|edit|revise|update|set|use|skip)\b/i.test(t)) {
+    return true;
+  }
+  return looksLikeRevisePending(t);
 }
 
 function toToolResult(outcome) {
@@ -204,7 +217,7 @@ registry.register({
       function: {
         name: 'wf_release_start',
         description:
-          'Start a WF release workflow from a PR, Jira key, branch, and/or repository. Runs read-only gathering until the first confirmation or question. Pass skip_tag=true to skip Git tag creation.',
+          'Start a release workflow from a PR, Jira key, branch, and/or repository. ALWAYS builds a complete draft first: reads GitHub/Jira and has the LLM populate every checklist field (tag, QA, Deploy, release notes, risk, rollback, etc.) in one pass. No GitHub/Jira writes happen until the user approves the draft; approval stages ONE confirmation that executes all planned writes. Pass skip_tag=true to skip Git tag creation.',
         parameters: {
           type: 'object',
           properties: {
@@ -217,15 +230,6 @@ registry.register({
               type: 'boolean',
               description: 'If true, skip creating the Git tag and continue to QA ticket',
             },
-            mode: {
-              type: 'string',
-              enum: ['step', 'draft'],
-              description: 'step = confirm each write; draft = gather full plan then one confirmation',
-            },
-            draft: {
-              type: 'boolean',
-              description: 'Shortcut for mode=draft',
-            },
           },
         },
       },
@@ -235,7 +239,7 @@ registry.register({
       function: {
         name: 'wf_release_draft',
         description:
-          'Build a complete release draft (reads GitHub/Jira, plans tag + QA + Deploy + checklist). Does not write until the user approves the draft and confirms.',
+          'Same as wf_release_start — every release always starts as a draft. Build a complete release draft (reads GitHub/Jira, plans tag + QA + Deploy + checklist, all fields populated at once). Does not write until the user approves the draft. Pass id to re-show an existing draft.',
         parameters: {
           type: 'object',
           properties: {
@@ -258,22 +262,30 @@ registry.register({
       function: {
         name: 'wf_release_revise_draft',
         description:
-          'Edit a release draft (tag, QA/Deploy titles, skip_tag, checklist fields) and re-show the full draft. Does not execute writes.',
+          'Edit a release draft (tag, QA/Deploy titles, skip_tag, checklist fields) and re-show the full draft with all step descriptions. Does not execute writes. Use this for any change request after a draft is shown.',
         parameters: {
           type: 'object',
           properties: {
             id: { type: 'string' },
             tag: { type: 'string' },
             skip_tag: { type: 'boolean' },
-            qa_summary: { type: 'string' },
-            deploy_summary: { type: 'string' },
+            qa_summary: { type: 'string', description: 'New QA ticket title/summary' },
+            deploy_summary: { type: 'string', description: 'New Deployment ticket title/summary' },
+            summary: {
+              type: 'string',
+              description: 'Alias for qa_summary when changing the QA ticket title',
+            },
             release_summary: { type: 'string' },
             technical_summary: { type: 'string' },
+            feature_group: { type: 'string', description: 'Product release feature group, or N/A' },
+            software_stack_changes: { type: 'string', description: 'Stack/dependency changes, or N/A' },
+            snyk_security: { type: 'string', description: 'Snyk security scan findings' },
             rollback_plan: { type: 'string' },
             risk: { type: 'string' },
             security: { type: 'string' },
             customer_impact: { type: 'string' },
             monitoring_owner: { type: 'string' },
+            github_link: { type: 'string' },
             message: { type: 'string', description: 'Tag annotation message' },
           },
           required: ['id'],
@@ -285,7 +297,7 @@ registry.register({
       function: {
         name: 'wf_release_approve_draft',
         description:
-          'Approve the release draft and stage a single execute_draft action. HARD-GATED: nothing is written until the user confirms in a later message (confirm_pending).',
+          'Approve the release draft and stage ONE confirmation covering ALL planned GitHub/Jira writes (tag → QA ticket → Deployment ticket). HARD-GATED: nothing is written until the user confirms (confirm_pending). On confirmation every step executes in order, then the workflow validates and exports automatically.',
         parameters: {
           type: 'object',
           properties: {
@@ -314,93 +326,11 @@ registry.register({
       function: {
         name: 'wf_release_advance',
         description:
-          'Advance an existing release workflow to the next pause (after skip/cancel, or to continue auto states). Use when the user says go to the next step / continue.',
+          'Resume a paused release workflow to the next pause (after a cancel or failure fix). Use when the user says continue / next step.',
         parameters: {
           type: 'object',
           properties: {
             id: { type: 'string', description: 'Workflow id (wf-…)' },
-          },
-          required: ['id'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'wf_release_skip',
-        description:
-          'Skip the current pending mutating step (tag / QA / deploy) and continue the workflow. Prefer this (or cancel_pending) when the user says skip tag / skip this step.',
-        parameters: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', description: 'Workflow id (wf-…)' },
-          },
-          required: ['id'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'wf_release_revise_pending',
-        description:
-          'Revise the staged pending action before confirm (e.g. change QA/Deploy ticket title/summary, or proposed tag). Re-stages for confirmation — does not invent new tool names.',
-        parameters: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', description: 'Workflow id (wf-…)' },
-            summary: { type: 'string', description: 'New Jira ticket summary/title' },
-            tag: { type: 'string', description: 'New tag / version name' },
-            message: { type: 'string', description: 'New tag annotation message' },
-          },
-          required: ['id'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'wf_release_answer',
-        description:
-          'Answer, accept suggestion, or skip an unknown checklist field during RESOLVE_UNKNOWN_FIELDS.',
-        parameters: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            field: { type: 'string' },
-            value: { type: 'string' },
-            skip: { type: 'boolean' },
-            accept: { type: 'boolean', description: 'Accept the suggested value' },
-          },
-          required: ['id'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'wf_release_edit',
-        description: 'Edit a ReleaseContext field during REVIEW_RELEASE.',
-        parameters: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            field: { type: 'string' },
-            value: { type: 'string' },
-          },
-          required: ['id', 'field', 'value'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'wf_release_approve_review',
-        description: 'Approve the release checklist review and continue to VALIDATE → EXPORT.',
-        parameters: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
           },
           required: ['id'],
         },
@@ -411,14 +341,14 @@ registry.register({
       function: {
         name: 'wf_release_execute_pending',
         description:
-          'Execute the staged release mutating step (create tag, QA ticket, or deployment ticket). HARD-GATED until user confirms.',
+          'Execute the approved release draft (all planned writes: tag, QA ticket, deployment ticket). HARD-GATED until user confirms.',
         parameters: {
           type: 'object',
           properties: {
             workflowId: { type: 'string' },
             type: {
               type: 'string',
-              description: 'create_tag | create_qa_ticket | create_deployment_ticket',
+              description: 'Always execute_draft',
             },
             payload: { type: 'object' },
           },
@@ -481,7 +411,7 @@ registry.register({
           });
         }
       }
-      const outcome = await engine.startDraft(args || {});
+      const outcome = await engine.start(args || {});
       return maybeStage(outcome, discordCtx);
     },
     wf_release_revise_draft: async (args) => {
@@ -498,33 +428,6 @@ registry.register({
     },
     wf_release_advance: async (args, discordCtx) => {
       const outcome = await engine.advance(args.id);
-      return maybeStage(outcome, discordCtx);
-    },
-    wf_release_skip: async (args, discordCtx) => {
-      const outcome = await engine.rejectPending(args.id, { reason: 'user_skip' });
-      return maybeStage(outcome, discordCtx);
-    },
-    wf_release_revise_pending: async (args, discordCtx) => {
-      const outcome = await engine.revisePending(args.id, {
-        summary: args.summary,
-        qa_summary: args.qa_summary,
-        deploy_summary: args.deploy_summary,
-        tag: args.tag,
-        message: args.message,
-        skip_tag: args.skip_tag,
-      });
-      return maybeStage(outcome, discordCtx);
-    },
-    wf_release_answer: async (args, discordCtx) => {
-      const outcome = await engine.answer(args.id, args);
-      return maybeStage(outcome, discordCtx);
-    },
-    wf_release_edit: async (args) => {
-      const outcome = await engine.edit(args.id, args);
-      return toToolResult(outcome);
-    },
-    wf_release_approve_review: async (args, discordCtx) => {
-      const outcome = await engine.approveReview(args.id);
       return maybeStage(outcome, discordCtx);
     },
     wf_release_execute_pending: async (args, discordCtx) =>
@@ -544,19 +447,21 @@ registry.register({
     const confirmOn = opts.confirmOn !== false;
     return [
       'WF Release workflow rules (CRITICAL):',
-      '- ONLY call these tools: wf_release_start, wf_release_draft, wf_release_revise_draft, wf_release_approve_draft, wf_release_status, wf_release_advance, wf_release_skip, wf_release_revise_pending, wf_release_answer, wf_release_edit, wf_release_approve_review, wf_release_execute_pending, confirm_pending, cancel_pending.',
+      '- ONLY call these tools: wf_release_start, wf_release_draft, wf_release_revise_draft, wf_release_approve_draft, wf_release_status, wf_release_advance, wf_release_execute_pending, confirm_pending, cancel_pending.',
       '- NEVER invent tool names (no wf_release_next, wf_release_propose, or similar).',
       '- Do NOT call github_create_tag or jira_create directly for a release flow.',
-      '- Prefer wf_release_draft when the user asks for a draft / full plan. Present the entire draft text to the user.',
-      '- After draft changes, call wf_release_revise_draft then show the updated draft.',
-      '- When the user approves the draft, call wf_release_approve_draft (stages one execute_draft) then wait for confirm_pending on the next turn.',
-      '- Step mode: wf_release_start confirms each write separately.',
-      '- Skip current mutating step → wf_release_skip (or cancel_pending).',
+      '- Standard flow: request → draft → user reviews → revise as needed → user approves → confirm → ALL writes execute, then validate + export automatically.',
+      '- EVERY release always starts as a draft (wf_release_start / wf_release_draft are equivalent): reads GitHub/Jira, then the LLM fills every checklist field in one pass. NO writes happen at this stage. Present the entire draft text to the user (all planned steps + descriptions + checklist).',
+      '- Always plan NEW QA and Deployment tickets. Never reuse, skip, or attach an existing QA/Deploy ticket from Jira links or a previous release — even if matching tickets already exist.',
+      '- After a draft is shown, ANY change request (tag, skip tag, QA/Deploy titles, checklist fields) → call wf_release_revise_draft with the workflow id and the fields to change, then show the updated full draft.',
+      '- When the user approves the draft, call wf_release_approve_draft. This stages ONE confirmation covering ALL writes (tag → QA ticket → Deployment ticket). After confirm_pending, every step runs in order and the workflow finishes on its own.',
+      '- cancel_pending returns to the draft without writing (already-executed steps are kept).',
       '- Show workflow id and state from tool results.',
+      '- When mentioning ANY Jira ticket (dev, QA, deploy), ALWAYS include the full Jira browse URL exactly as shown in tool output — never a bare ticket key. Never invent or alter URLs.',
       '- Never invent checklist fields, ticket keys, or tag names — only use tool evidence.',
       confirmOn
-        ? '- Mutating steps / draft execution are HARD-GATED until confirm_pending on a later turn.'
-        : '- Confirmation disabled: mutating steps execute immediately.',
+        ? '- Draft execution is HARD-GATED until confirm_pending on a later turn.'
+        : '- Confirmation disabled: draft execution runs immediately on approval.',
       intent.draft ? '- This turn looks like a DRAFT request — use wf_release_draft.' : '',
       intent.approveDraft ? '- User is approving a draft — use wf_release_approve_draft with the workflow id.' : '',
       intent.workflowId ? `- Active workflow id hint: ${intent.workflowId}` : '',
@@ -570,6 +475,11 @@ registry.register({
     const t = String(userText || '');
     const idHint = intent.workflowId || extractWorkflowId(t);
     const startingFresh = looksLikeReleaseStart(t) || looksLikeDraftRequest(t);
+    // After a draft is presented there is usually no confirm pending — prefer draft revise
+    const preferDraftRevise =
+      /\bdraft\b/i.test(t) ||
+      intent.draft ||
+      (idHint && !opts.hasPending && looksLikeDraftRevision(t));
 
     if (intent.mode === 'confirm' && opts.hasPending) {
       pushTool('confirm_pending', 'If user confirmed, execute the staged release action');
@@ -583,7 +493,7 @@ registry.register({
     }
 
     if (intent.draft || looksLikeDraftRequest(t)) {
-      if (idHint && /\b(change|edit|revise|update|set|use)\b/i.test(t)) {
+      if (idHint && /\b(change|edit|revise|update|set|use|skip)\b/i.test(t)) {
         pushTool('wf_release_revise_draft', 'Apply draft edits and re-show draft');
       } else {
         pushTool('wf_release_draft', 'Build or show the full release draft');
@@ -601,20 +511,20 @@ registry.register({
     }
 
     if ((intent.skipPending || looksLikeSkipPending(t)) && (opts.hasPending || idHint)) {
-      if (idHint) pushTool('wf_release_skip', 'Skip current pending step and continue');
-      else pushGuidance('need_id', 'Need workflow id for wf_release_skip (from prior turn)');
+      if (idHint && /\b(skip|remove)\s+(the\s+)?(git\s+)?tag\b/i.test(t)) {
+        pushTool('wf_release_revise_draft', 'Skip tag on draft (skip_tag=true) and re-show');
+        return;
+      }
       if (opts.hasPending) {
-        pushTool('cancel_pending', 'Alternate: cancel staged pending (also advances release)');
+        pushTool('cancel_pending', 'Cancel staged execution and return to the draft');
+      } else {
+        pushTool('wf_release_revise_draft', 'Skip the step on the draft and re-show');
       }
       return;
     }
 
-    if (intent.revisePending || looksLikeRevisePending(t)) {
-      if (/\bdraft\b/i.test(t)) {
-        pushTool('wf_release_revise_draft', 'Update draft fields and re-show');
-      } else {
-        pushTool('wf_release_revise_pending', 'Update pending summary/tag then re-stage for confirm');
-      }
+    if (intent.revisePending || looksLikeRevisePending(t) || preferDraftRevise) {
+      pushTool('wf_release_revise_draft', 'Update draft fields and re-show full plan');
       return;
     }
 
@@ -629,19 +539,13 @@ registry.register({
     }
 
     if (/\b(approve|looks good|lgtm)\b/i.test(t) && !opts.hasPending) {
-      pushTool('wf_release_approve_draft', 'If draft mode, approve draft');
-      pushTool('wf_release_approve_review', 'If checklist review, approve review');
-      return;
-    }
-
-    if (/\bskip\b/i.test(t) && /\b(field|unknown|checklist)\b/i.test(t)) {
-      pushTool('wf_release_answer', 'Skip an unknown checklist field');
+      pushTool('wf_release_approve_draft', 'Approve the draft — stages one confirmation for all writes');
       return;
     }
 
     if (idHint) {
       pushTool('wf_release_status', 'Check current release workflow state');
-      pushGuidance('followup', 'Then advance, skip, revise_draft/revise_pending, or answer as needed');
+      pushGuidance('followup', 'Then advance, revise_draft, or approve_draft as needed');
       return;
     }
 
@@ -669,6 +573,7 @@ module.exports = {
   looksLikeSkipPending,
   looksLikeRevisePending,
   looksLikeDraftRequest,
+  looksLikeDraftRevision,
   releaseIntentFromContext,
   WF_ID_RE,
 };

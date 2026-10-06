@@ -59,6 +59,13 @@ function clearSession(channelId, userId) {
   store.delete(sessionKey(channelId, userId));
 }
 
+function clearChannel(channelId) {
+  const prefix = `${channelId}:`;
+  for (const key of store.keys()) {
+    if (key.startsWith(prefix)) store.delete(key);
+  }
+}
+
 function getDiscordMeta(channelId, userId) {
   return getSession(channelId, userId)?.discord || null;
 }
@@ -69,5 +76,6 @@ module.exports = {
   appendMessage,
   getHistory,
   clearSession,
+  clearChannel,
   getDiscordMeta,
 };

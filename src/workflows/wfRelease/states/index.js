@@ -1,11 +1,10 @@
-const { STATES } = require('../context');
+const { STATES, setState } = require('../context');
 const readAndVersion = require('./readAndVersion');
 const mutating = require('./mutating');
 const checklist = require('./checklist');
 
 const handlers = {
   [STATES.START]: async (ctx) => {
-    const { setState } = require('../context');
     setState(ctx, STATES.IDENTIFY_SOURCE);
     return { continue: true };
   },
@@ -13,13 +12,9 @@ const handlers = {
   [STATES.READ_GITHUB]: readAndVersion.readGithub,
   [STATES.READ_JIRA]: readAndVersion.readJira,
   [STATES.DETERMINE_VERSION]: readAndVersion.determineVersion,
-  [STATES.CREATE_TAG]: mutating.createTag,
   [STATES.CREATE_QA_TICKET]: mutating.createQaTicket,
   [STATES.CREATE_DEPLOYMENT_TICKET]: mutating.createDeploymentTicket,
-  [STATES.LINK_JIRA]: mutating.linkJira,
   [STATES.GENERATE_RELEASE_CONTEXT]: checklist.generateReleaseContext,
-  [STATES.RESOLVE_UNKNOWN_FIELDS]: checklist.resolveUnknownFields,
-  [STATES.REVIEW_RELEASE]: checklist.reviewRelease,
   [STATES.DRAFT_REVIEW]: checklist.draftReview,
   [STATES.VALIDATE]: checklist.validate,
   [STATES.EXPORT]: checklist.exportArtifacts,
@@ -40,7 +35,6 @@ const handlers = {
     message: 'Waiting for confirmation of the pending release action.',
   }),
   [STATES.FAILED]: async (ctx) => {
-    const { setState } = require('../context');
     setState(ctx, STATES.RECOVER);
     return { continue: true };
   },

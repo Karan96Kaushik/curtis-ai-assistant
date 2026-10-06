@@ -1,9 +1,14 @@
 node_modules/
 .env
+.env.local
 .DS_Store
 *.log
 .npm/
 dist/
+*.tsbuildinfo
+.amplify/
+amplify_outputs*.json
+!amplify_outputs.json
 context/org-memory.md
 context/schedule.json
 context/releases/
