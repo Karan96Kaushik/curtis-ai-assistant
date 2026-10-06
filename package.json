@@ -15,8 +15,6 @@
     "jira:activity": "node scripts/jira-monthly-activity.js",
     "github:activity": "node scripts/github-monthly-activity.js",
     "extension:pack": "node scripts/pack-firefox-extension.js",
-    "playwright:install": "playwright install chromium",
-    "postinstall": "playwright install chromium",
     "test:github-list-repos": "node scripts/test-github-list-repos.js",
     "test:agent-runtime": "tsx scripts/test-agent-runtime.ts",
     "test": "npm run test:github-list-repos",

@@ -66,15 +66,6 @@ class EvidenceLedger {
     return this.entries.some((e) => e.tool === 'web_search' && e.source === 'mock');
   }
 
-  hasPriceListings() {
-    return this.entries.some(
-      (e) =>
-        e.tool === 'web_check_prices' &&
-        e.ok &&
-        e.claimable.some((c) => c.type === 'listing')
-    );
-  }
-
   jiraIssueCount() {
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
@@ -120,8 +111,6 @@ function extractClaimable(tool, envelope, text) {
 
 function formatClaim(c) {
   if (c.type === 'link') return `link("${c.title}" → ${c.url})`;
-  if (c.type === 'listing') return `listing("${c.name}" @ ${c.price})`;
-  if (c.type === 'stay') return `stay(${c.destination} ${c.checkInDate}→${c.checkOutDate})`;
   if (c.type === 'issue_count') return `issue_count=${c.value}`;
   if (c.type === 'issue') return `issue(${c.key})`;
   if (c.type === 'side_effect') return `side_effect(${c.value})`;

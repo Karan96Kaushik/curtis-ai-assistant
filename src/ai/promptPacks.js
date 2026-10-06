@@ -10,7 +10,7 @@ const SURFACES = {
   },
   web: {
     persona:
-      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, and light web research at Flexible Power Systems. Browser, Microsoft Teams, travel price checks, and scheduled tasks are not available in the web app.',
+      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, and light web research at Flexible Power Systems. Browser, Microsoft Teams, and scheduled tasks are not available in the web app.',
     clearChat:
       'If asked to clear the chat, call clear_context (that forgets this conversation’s memory; the user can start a new chat from the sidebar).',
   },

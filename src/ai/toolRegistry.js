@@ -87,13 +87,6 @@ function toolsForIntent(intent, opts = {}) {
     allowed.add('web_fetch_page');
   }
 
-  // Travel price scrape only for travel/compare (not every heavy budget like Teams/browser)
-  if (intent.domain === 'travel' || intent.mode === 'compare' || intent.domain === 'mixed') {
-    allowed.add('web_search');
-    allowed.add('web_check_prices');
-    allowed.add('web_fetch_page');
-  }
-
   if (intent.domain === 'scheduler') {
     allowed.add('schedule_task');
     allowed.add('list_schedules');

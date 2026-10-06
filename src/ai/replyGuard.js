@@ -9,9 +9,6 @@ const SUCCESS_CLAIM_RE =
 const WEB_SEARCH_CLAIM_RE =
   /\b(i\s+(searched|looked up)|according to (my |the )?search|search results? (show|say)|from the web|online sources?)\b/i;
 
-const PRICE_CLAIM_RE =
-  /\b(per night|nightly|hotels? (from|start|cost)|listing[s]? (at|from)|£\d|\$\d|€\d|prices? (for|in))\b/i;
-
 const WRITE_TOOLS = new Set([
   'jira_create',
   'jira_update',
@@ -63,7 +60,6 @@ function compactToolNote(toolResults) {
       status = m ? `${m[1]} issues` : 'ok';
     } else if (/Appended to org memory|Wrote org memory/i.test(text)) status = 'memory-ok';
     else if (/source:\s*mock/i.test(text)) status = 'mock';
-    else if (/No listings scraped|Price check failed/i.test(text)) status = 'empty';
 
     const filters = [];
     const jql = text.match(/^JQL:\s*(.+)$/m);
@@ -143,24 +139,6 @@ function checkReplyGrounding(reply, toolResults, evidence = null) {
     }
   }
 
-  if (PRICE_CLAIM_RE.test(text)) {
-    const priced = toolResults.some((t) => t.name === 'web_check_prices');
-    if (!priced) {
-      return {
-        ok: false,
-        reason: 'Reply claims hotel/listing prices but web_check_prices did not run this turn.',
-      };
-    }
-    if (evidence && !evidence.hasPriceListings()) {
-      if (!/\b(could not|couldn't|unable|failed|no listings|blocked|unavailable)\b/i.test(text)) {
-        return {
-          ok: false,
-          reason: 'Reply claims prices but evidence has no listing claims (scrape empty/failed).',
-        };
-      }
-    }
-  }
-
   // Soft check: "no tickets" vs tool showing issues
   const myIssues = toolResults.filter((t) => t.name === 'jira_my_issues').pop();
   if (
@@ -197,7 +175,6 @@ function fallbackFromTools(toolResults, evidence = null) {
 module.exports = {
   SUCCESS_CLAIM_RE,
   WEB_SEARCH_CLAIM_RE,
-  PRICE_CLAIM_RE,
   WRITE_TOOLS,
   summarizeToolOutcomes,
   compactToolNote,

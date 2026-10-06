@@ -79,38 +79,14 @@ async function fetchFast(url) {
 }
 
 /**
- * Playwright: load page and extract visible-ish text.
- * @param {string} url
- */
-async function fetchBrowser(url) {
-  return browserManager.runInBrowser(async (page) => {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await new Promise((r) => setTimeout(r, 800));
-    const extracted = await page.evaluate(() => {
-      const title = document.title || '';
-      const root =
-        document.querySelector('main') ||
-        document.querySelector('article') ||
-        document.body;
-      const text = (root && root.innerText) || '';
-      return { title, text: text.replace(/\n{3,}/g, '\n\n').trim() };
-    });
-    return extracted;
-  });
-}
-
-/**
- * Open a URL and return readable page text.
- * @param {{ url: string, mode?: 'auto'|'fast'|'browser', max_chars?: number }} payload
+ * Open a URL over HTTP and return readable page text (no JS rendering).
+ * @param {{ url: string, max_chars?: number }} payload
  */
 async function webFetchPageTask(payload = {}) {
   const url = normalizeUrl(payload.url || payload.link || payload.href);
   if (!url) {
     throw new Error('Missing or invalid url (expected http(s) URL)');
   }
-
-  let mode = String(payload.mode || 'auto').toLowerCase();
-  if (!['auto', 'fast', 'browser'].includes(mode)) mode = 'auto';
 
   let maxChars = Number(payload.max_chars ?? payload.maxChars ?? 6000);
   if (!Number.isFinite(maxChars) || maxChars < 500) maxChars = 6000;
@@ -119,54 +95,32 @@ async function webFetchPageTask(payload = {}) {
   /** @type {{ title: string|null, text: string, source: string, status?: number, warning?: string }} */
   let result = { title: null, text: '', source: 'unknown' };
 
-  if (mode === 'fast' || mode === 'auto') {
-    try {
-      const fast = await fetchFast(url);
-      if (fast.status >= 200 && fast.status < 400 && fast.html) {
-        const parsed = htmlToText(fast.html);
-        const thin = parsed.text.length < 200;
-        if (!thin || mode === 'fast') {
-          result = {
-            title: parsed.title,
-            text: parsed.text,
-            source: 'axios',
-            status: fast.status,
-            warning: thin ? 'Fast fetch returned little text; page may be JS-rendered.' : undefined,
-          };
-        } else {
-          result.warning = 'Fast fetch thin; escalating to Playwright';
-        }
-      } else {
-        result.warning = `Fast fetch HTTP ${fast.status}`;
-      }
-    } catch (err) {
-      result.warning = `Fast fetch failed: ${err.message || err}`;
-    }
-  }
-
-  if ((mode === 'browser' || mode === 'auto') && result.text.length < 200) {
-    try {
-      const browser = await fetchBrowser(url);
+  try {
+    const fast = await fetchFast(url);
+    if (fast.status >= 200 && fast.status < 400 && fast.html) {
+      const parsed = htmlToText(fast.html);
       result = {
-        title: browser.title || result.title,
-        text: browser.text || '',
-        source: 'playwright',
-        status: result.status,
-        warning: result.warning,
+        title: parsed.title,
+        text: parsed.text,
+        source: 'axios',
+        status: fast.status,
+        warning:
+          parsed.text.length < 200
+            ? 'Page returned little text; it may need JavaScript to render, which is not supported.'
+            : undefined,
       };
-    } catch (err) {
-      if (!result.text) {
-        return withEnvelope({
-          ok: false,
-          source: 'playwright',
-          confidence: 'none',
-          data: { url, title: null, text: '', chars: 0 },
-          error: String(err.message || err),
-          warning: result.warning,
-        });
-      }
-      result.warning = `${result.warning || ''} | Browser fallback failed: ${err.message || err}`.trim();
+    } else {
+      result.status = fast.status;
+      result.warning = `HTTP ${fast.status}`;
     }
+  } catch (err) {
+    return withEnvelope({
+      ok: false,
+      source: 'axios',
+      confidence: 'none',
+      data: { url, title: null, text: '', chars: 0 },
+      error: String(err.message || err),
+    });
   }
 
   const cut = truncate(result.text, maxChars);
@@ -177,13 +131,12 @@ async function webFetchPageTask(payload = {}) {
     chars: cut.text.length,
     truncated: cut.truncated,
     httpStatus: result.status ?? null,
-    mode,
   };
 
   return withEnvelope({
     ok: Boolean(result.text),
     source: result.source,
-    confidence: confidenceFromSource(result.source === 'playwright' ? 'scrape' : result.source),
+    confidence: confidenceFromSource(result.source),
     data: payloadOut,
     warning: result.warning,
     error: result.text ? undefined : 'No page text extracted',

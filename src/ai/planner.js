@@ -71,7 +71,6 @@ function stopCondition(intent) {
   }
   if (intent.mode === 'agenda') return 'jira_my_issues ran; system will synthesize agenda';
   if (intent.mode === 'lookup' && intent.domain === 'jira') return 'jira_my_issues ran this turn';
-  if (intent.domain === 'travel') return 'web_check_prices ran or dates missing asked once';
   if (intent.domain === 'web') return 'web_search ran (disclose mock/low confidence)';
   if (intent.mode === 'mutate') return 'mutation staged or executed; user informed';
   return 'plain-text reply or real tool calls only; no invented tool names';

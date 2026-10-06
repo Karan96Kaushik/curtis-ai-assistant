@@ -279,7 +279,7 @@ function buildSystemPrompt(discordCtx, turn) {
     '- When no tool is needed (e.g. "what can you do?"), reply with plain assistant text immediately.',
     '- Optional: use think for a private scratchpad on complex asks.',
     '- After tools (or with no tools), stop tool-calling; a separate system pass synthesizes the final reply.',
-    '- Prefer required fields over guessing (especially travel dates).',
+    '- Prefer required fields over guessing.',
     '',
     'Structured plan for this turn:',
     formatPlanForPrompt(turn.plan),
@@ -453,11 +453,11 @@ async function repairUngroundedReply(messages, draft, toolResults, evidence) {
 
 function shouldSynthesize(intent, toolResults) {
   if (!toolResults.length) return false;
-  if (intent.mode === 'agenda' || intent.mode === 'research' || intent.mode === 'compare') return true;
-  if (intent.domain === 'web' || intent.domain === 'travel' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
+  if (intent.mode === 'agenda' || intent.mode === 'research') return true;
+  if (intent.domain === 'web' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
   if (intent.isWorkAgenda || intent.isIssueList || intent.isIssueDetail) return true;
   return toolResults.some((t) =>
-    ['web_search', 'web_fetch_page', 'web_check_prices', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
+    ['web_search', 'web_fetch_page', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
   );
 }
 
@@ -778,8 +778,8 @@ async function handleUserMessage({ text, discord }) {
         messages.push({
           role: 'system',
           content: [
-            `GROUNDING: Call web_fetch_page now with url="${url}" (mode=auto).`,
-            'Do not use web_search. Do not claim Playwright is unavailable.',
+            `GROUNDING: Call web_fetch_page now with url="${url}".`,
+            'Do not use web_search.',
           ].join(' '),
         });
         roundTimer.end('force_web_fetch_page');

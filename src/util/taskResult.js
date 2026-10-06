@@ -35,7 +35,7 @@ function confidenceFromSource(source) {
   const s = String(source || '').toLowerCase();
   if (!s || s === 'unknown') return 'none';
   if (s === 'mock') return 'low';
-  if (s === 'duckduckgo-html' || s === 'scrape' || s === 'booking.com') return 'medium';
+  if (s === 'duckduckgo-html' || s === 'scrape') return 'medium';
   if (s === 'serper' || s === 'serpapi' || s === 'jira' || s === 'github' || s === 'org-memory') return 'high';
   return 'medium';
 }
@@ -104,7 +104,7 @@ function envelopeFromRaw(taskName, raw) {
   }
 
   // web-fetch-page
-  if (raw.data?.url && (raw.data.text != null || raw.source === 'axios' || raw.source === 'playwright')) {
+  if (raw.data?.url && (raw.data.text != null || raw.source === 'axios')) {
     return withEnvelope({
       ok: raw.ok !== false && !raw.error,
       source: raw.source || 'web-fetch',
@@ -124,25 +124,6 @@ function envelopeFromRaw(taskName, raw) {
       confidence,
       data: { query: raw.query, results: raw.results, count: raw.count },
       warning: raw.warning || (raw.source === 'mock' ? 'Results are mock/fallback, not live search.' : undefined),
-      error: raw.error,
-    });
-  }
-
-  // web-check-prices shape
-  if (Array.isArray(raw.listings) && raw.destination != null) {
-    const hasListings = raw.listings.length > 0;
-    return withEnvelope({
-      ok: hasListings && !raw.error,
-      source: 'booking.com',
-      confidence: hasListings ? 'medium' : 'none',
-      data: {
-        destination: raw.destination,
-        checkInDate: raw.checkInDate,
-        checkOutDate: raw.checkOutDate,
-        listings: raw.listings,
-        searchUrl: raw.searchUrl,
-      },
-      warning: raw.warning,
       error: raw.error,
     });
   }

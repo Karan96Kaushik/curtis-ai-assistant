@@ -9,7 +9,6 @@ require('./meta');
 require('./schedulerModule');
 require('./memory');
 require('./web');
-require('./travel');
 require('./release');
 require('./jira');
 require('./github');

@@ -31,10 +31,9 @@ const pendingActions = pendingActionsModule as unknown as PendingActionsApi;
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge
- * (browser, teams), the 30s cron loop that posts to Discord (scheduler), and
- * Playwright scraping (travel).
+ * (browser, teams) and the 30s cron loop that posts to Discord (scheduler).
  */
-const LOCAL_ONLY_MODULES = ['browser', 'teams', 'scheduler', 'travel'];
+const LOCAL_ONLY_MODULES = ['browser', 'teams', 'scheduler'];
 
 for (const id of LOCAL_ONLY_MODULES) registry.unregister(id);
 

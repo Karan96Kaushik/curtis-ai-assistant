@@ -30,9 +30,6 @@ registry.register({
 
   intent: (text) => {
     const t = String(text || '').trim();
-    const travel = /\b(hotel|hotels|booking\.com|airbnb|accommodation|stay|stays|room rates?|nightly)\b/i.test(t);
-    if (travel) return null;
-
     const url = extractUrl(t);
     if (parseGithubUrl(t) || (url && parseGithubUrl(url)) || (/\bgithub\.com\b/i.test(t) && !url)) {
       return null;
@@ -82,16 +79,11 @@ registry.register({
       function: {
         name: 'web_fetch_page',
         description:
-          'Open a URL and return readable page text. Tries fast HTTP first, then Playwright for JS-heavy pages. Use when the user asks to open/read/scrape a specific URL.',
+          'Open a URL over HTTP and return readable page text (no JavaScript rendering). Use when the user asks to open/read/scrape a specific URL.',
         parameters: {
           type: 'object',
           properties: {
             url: { type: 'string', description: 'Full http(s) URL to open' },
-            mode: {
-              type: 'string',
-              enum: ['auto', 'fast', 'browser'],
-              description: 'auto (default) = fast then Playwright if thin; browser = Playwright only',
-            },
             max_chars: { type: 'integer', description: 'Max characters of text to return (default 6000)' },
           },
           required: ['url'],
@@ -131,7 +123,6 @@ registry.register({
     web_fetch_page: async (args) =>
       executeTaskDetailed('web-fetch-page', {
         url: args.url,
-        mode: args.mode,
         max_chars: args.max_chars,
       }),
   },
@@ -142,7 +133,7 @@ registry.register({
       '- Specific URL / "open … and give me text" → call web_fetch_page (NOT web_search).',
       '- github.com URLs are GitHub, not web research — use github_* tools (the GitHub client), never web_fetch_page.',
       '- Open questions / "look up X" → web_search.',
-      '- You DO have Playwright via web_fetch_page (mode=auto|browser). Never claim you cannot open pages.',
+      '- web_fetch_page reads pages over plain HTTP. If it returns little text (JS-rendered page), say so rather than guessing the content.',
       '- Summarize page text for Discord; cite the URL from the tool result.',
       '- If source is mock or confidence is low, disclose that clearly.',
       intent?.pageUrl ? `- Target URL for this turn: ${intent.pageUrl}` : null,
@@ -153,7 +144,6 @@ registry.register({
 
   buildPlan: (intent, userText, opts, pushTool, pushGuidance) => {
     if (intent.domain !== 'web' && intent.mode !== 'research') return;
-    if (intent.domain === 'travel' || intent.mode === 'compare') return;
 
     if (intent.forceWebFetch || intent.reason === 'web-fetch') {
       pushTool('web_fetch_page', `Open ${intent.pageUrl || 'the URL'} and extract page text`);
