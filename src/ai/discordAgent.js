@@ -587,12 +587,9 @@ async function handleUserMessage(input) {
     const confirmOn = requireConfirmation();
     let tools = toolsForIntent(intent, { confirmOn, hasPending });
     if (turnCtx.phoneNotificationContext) {
-      const blocked = new Set([
-        phoneNotifications.TOOL_NAME,
-        'confirm_pending',
-        'memory_append',
-        'memory_write',
-      ]);
+      // Keep request_phone_notifications in the tool list. The model often calls it
+      // again after confirm, and the provider rejects a call to a tool that was omitted.
+      const blocked = new Set(['memory_append', 'memory_write']);
       tools = tools.filter((tool) => !blocked.has(tool.function.name));
     }
 

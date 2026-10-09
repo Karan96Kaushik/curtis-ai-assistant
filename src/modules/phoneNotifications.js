@@ -88,6 +88,30 @@ registry.register({
     [phone.TOOL_NAME]: async (args, discordCtx) => {
       if (!isWeb()) return notAvailable();
 
+      const shared = phone.peekTurnContext();
+      if (shared) {
+        const loaded = phone.bindConfirmedContext({ duration_minutes: shared.durationMinutes }, shared);
+        if (loaded.ok) {
+          return {
+            text: [
+              `Phone notifications for the last ${loaded.context.durationMinutes} minutes are already loaded (${loaded.context.items.length}).`,
+              'Answer from the PHONE NOTIFICATIONS context in this turn.',
+              'Do not ask the user to confirm again.',
+            ].join(' '),
+            envelope: {
+              ok: true,
+              source: 'phone-notifications',
+              confidence: 'high',
+              data: {
+                already_loaded: true,
+                count: loaded.context.items.length,
+                duration_minutes: loaded.context.durationMinutes,
+              },
+            },
+          };
+        }
+      }
+
       if (args && args.__confirmed) {
         const { __confirmed, ...clean } = args;
         const check = phone.bindConfirmedContext(clean, phone.peekTurnContext());
