@@ -95,6 +95,53 @@ function ticketSummary(prefix, ctx) {
   return `Deploy ${component} ${ver} to Prod`;
 }
 
+/** Default Jira body for the QA ticket, built from the current release state. */
+function qaDescription(ctx) {
+  const r = ctx.release;
+  return [
+    `QA for release ${r.next_version}`,
+    `Repository: ${r.repository}`,
+    `PR: ${r.source_pr || 'n/a'}`,
+    `Development: ${r.development_ticket || 'n/a'}`,
+    `Tag: ${r.next_version}`,
+  ].join('\n');
+}
+
+/** Default Jira body for the Deployment ticket — includes the QA key once it exists. */
+function deployDescription(ctx) {
+  const r = ctx.release;
+  return [
+    `Deployment for release ${r.next_version}`,
+    `Repository: ${r.repository}`,
+    `PR: ${r.source_pr || 'n/a'}`,
+    `Development: ${r.development_ticket || 'n/a'}`,
+    `QA: ${r.qa_ticket || 'n/a'}`,
+    `Tag: ${r.next_version}`,
+  ].join('\n');
+}
+
+/** One-line description of a planned ticket step for the draft. */
+function ticketStepDescription(payload) {
+  return [
+    `Create Jira ${payload.issueType} in ${payload.projectKey}`,
+    payload.parentKey ? `under parent ${payload.parentKey}` : null,
+    `with summary "${payload.summary}".`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** One-line description of the planned tag step for the draft. */
+function tagStepDescription(payload) {
+  return [
+    `Create annotated tag \`${payload.tag}\` on \`${payload.repo}\` at commit \`${payload.sha || '?'}\`.`,
+    payload.bump ? `Bump: ${payload.bump}${payload.reason ? ` (${payload.reason})` : ''}.` : null,
+    payload.previous_version ? `Previous tag: ${payload.previous_version}.` : 'No previous stable tag found.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 /**
  * Resolve issue type + optional parent for QA/Deploy creates.
  * Sub-tasks require a non-subtask parent in Jira. Prefer the development ticket's
@@ -130,6 +177,10 @@ module.exports = {
   componentFromRepo,
   jiraLink,
   ticketSummary,
+  qaDescription,
+  deployDescription,
+  ticketStepDescription,
+  tagStepDescription,
   resolveCreateTicketType,
   JIRA_KEY_RE,
 };

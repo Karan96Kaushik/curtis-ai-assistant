@@ -3,8 +3,33 @@ const { createJiraClient, adfToPlainText, browseUrl } = require('../../../integr
 const { proposeNextVersion } = require('../semver');
 const { setField, markUnknown } = require('../fields');
 const { audit, setState, STATES } = require('../context');
-const { parseStartInput, warn, componentFromRepo, ticketSummary, JIRA_KEY_RE } = require('../helpers');
+const {
+  parseStartInput,
+  warn,
+  componentFromRepo,
+  ticketSummary,
+  tagStepDescription,
+  JIRA_KEY_RE,
+} = require('../helpers');
 const { upsertDraftStep } = require('../draft');
+const { summarizeChecks } = require('../../../tasks/githubGetPr');
+
+/** Snyk statuses/check-runs on the first ref that has any (PR head first, then merge commit). */
+async function readSnykChecks(gh, owner, repo, refs) {
+  for (const ref of [...new Set(refs.filter(Boolean))]) {
+    const [combined, runs] = await Promise.allSettled([
+      gh.getCombinedStatus({ owner, repo, ref }),
+      gh.listCheckRuns({ owner, repo, ref }),
+    ]);
+    const { checks } = summarizeChecks(
+      combined.status === 'fulfilled' ? combined.value : null,
+      runs.status === 'fulfilled' ? runs.value : null
+    );
+    const snyk = checks.filter((c) => /snyk/i.test(c.name || ''));
+    if (snyk.length) return snyk;
+  }
+  return [];
+}
 
 async function identifySource(ctx) {
   const r = ctx.release;
@@ -110,6 +135,12 @@ async function readGithub(ctx) {
             r.ci_status = null;
           }
         }
+      }
+
+      try {
+        r.snyk_checks = await readSnykChecks(gh, owner, repo, [pr.head?.sha, r.merge_commit]);
+      } catch (err) {
+        warn(ctx, `Snyk check lookup failed: ${err.message}`);
       }
 
       setField(ctx, 'source_branch', r.source_branch, { confidence: 'high', source: 'github_pr' });
@@ -227,8 +258,11 @@ async function readJira(ctx) {
     r.development_project = f.project?.key || null;
     r.development_issue_type = f.issuetype?.name || 'Task';
     r.development_parent_key = f.parent?.key || null;
-    r.developer =
-      r.developer || f.assignee?.displayName || f.assignee?.emailAddress || r.developer;
+    // The form wants a person's name — prefer the Jira assignee over a GitHub login.
+    if (f.assignee?.displayName && (!r.developer || ctx.fields?.developer?.source === 'github_pr')) {
+      r.developer = f.assignee.displayName;
+    }
+    r.developer = r.developer || f.assignee?.emailAddress || null;
 
     setField(ctx, 'development_ticket', r.development_ticket, {
       confidence: 'high',
@@ -301,25 +335,6 @@ async function determineVersion(ctx) {
     warn(ctx, 'No merge commit SHA — tag creation will need a SHA');
   }
 
-  // Start args / user text asked to skip tagging
-  if (r.tag_skipped || ctx._skip_tag) {
-    r.tag_skipped = true;
-    warn(ctx, 'Tag creation skipped by user request');
-    audit(ctx, 'skip_tag', { next_version: r.next_version });
-    upsertDraftStep(ctx, {
-      type: 'create_tag',
-      title: 'Create Git tag',
-      description: `Skip creating a Git tag. Version ${r.next_version} is still used for ticket titles.`,
-      skip: true,
-      payload: null,
-    });
-    setState(ctx, STATES.CREATE_QA_TICKET);
-    return {
-      continue: true,
-      message: `Skipping Git tag (proposed ${r.next_version}). Continuing to QA ticket…`,
-    };
-  }
-
   const payload = {
     repo: r.repository,
     tag: r.next_version,
@@ -330,14 +345,29 @@ async function determineVersion(ctx) {
     previous_version: r.previous_version,
   };
 
+  // Start args / user text asked to skip tagging — keep the plan so it can be un-skipped.
+  if (r.tag_skipped || ctx._skip_tag) {
+    r.tag_skipped = true;
+    warn(ctx, 'Tag creation skipped by user request');
+    audit(ctx, 'skip_tag', { next_version: r.next_version });
+    upsertDraftStep(ctx, {
+      type: 'create_tag',
+      title: 'Create Git tag',
+      description: `Skip creating a Git tag. Version ${r.next_version} is still used for ticket titles.`,
+      skip: true,
+      payload,
+    });
+    setState(ctx, STATES.CREATE_QA_TICKET);
+    return {
+      continue: true,
+      message: `Skipping Git tag (proposed ${r.next_version}). Continuing to QA ticket…`,
+    };
+  }
+
   upsertDraftStep(ctx, {
     type: 'create_tag',
     title: 'Create Git tag',
-    description: [
-      `Create annotated tag \`${payload.tag}\` on \`${payload.repo}\` at commit \`${payload.sha || '?'}\`.`,
-      `Bump: ${payload.bump} (${payload.reason}).`,
-      payload.previous_version ? `Previous tag: ${payload.previous_version}.` : 'No previous stable tag found.',
-    ].join(' '),
+    description: tagStepDescription(payload),
     payload,
   });
   audit(ctx, 'draft_plan_tag', payload);

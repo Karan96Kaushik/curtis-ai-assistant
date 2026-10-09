@@ -2,142 +2,91 @@ const { createGithubClient, parseRepo } = require('../../../integrations/githubC
 const { createJiraClient, browseUrl } = require('../../../integrations/jiraClient');
 const { setField } = require('../fields');
 const { audit, setState, STATES } = require('../context');
-const { warn, ticketSummary, resolveCreateTicketType } = require('../helpers');
+const {
+  warn,
+  ticketSummary,
+  resolveCreateTicketType,
+  qaDescription,
+  deployDescription,
+  ticketStepDescription,
+} = require('../helpers');
 const { upsertDraftStep, markStepDone } = require('../draft');
 
 function createdThisWorkflow(ctx, field) {
   return ctx.fields?.[field]?.source === 'jira_create';
 }
 
+const TICKETS = {
+  qa: {
+    stepType: 'create_qa_ticket',
+    title: 'Create QA ticket',
+    label: 'QA',
+    field: 'qa_ticket',
+    next: STATES.CREATE_DEPLOYMENT_TICKET,
+    describe: qaDescription,
+  },
+  deploy: {
+    stepType: 'create_deployment_ticket',
+    title: 'Create Deployment ticket',
+    label: 'Deployment',
+    field: 'deployment_ticket',
+    next: STATES.GENERATE_RELEASE_CONTEXT,
+    describe: deployDescription,
+  },
+};
+
 /**
- * Planning state: add the QA-ticket create step to the draft.
- * Never reuses an existing ticket — every release gets a new QA ticket.
+ * Planning state: add a QA/Deployment ticket create step to the draft.
+ * Never reuses an existing ticket — every release gets new QA and Deploy tickets.
  */
-async function createQaTicket(ctx) {
+function planTicket(ctx, kind) {
+  const spec = TICKETS[kind];
   const r = ctx.release;
   // Idempotent re-entry: skip only when THIS workflow already created the ticket.
-  if (r.qa_ticket && createdThisWorkflow(ctx, 'qa_ticket')) {
-    setState(ctx, STATES.CREATE_DEPLOYMENT_TICKET);
+  if (r[spec.field] && createdThisWorkflow(ctx, spec.field)) {
+    setState(ctx, spec.next);
     return { continue: true };
   }
-  r.qa_ticket = null;
+  r[spec.field] = null;
 
   if (!r.development_project || !r.development_issue_type) {
-    warn(ctx, 'Cannot create QA ticket — missing development project/type; skipping');
+    warn(ctx, `Cannot plan ${spec.label} ticket — missing development project/type; set qa/deploy project and type on the draft`);
     upsertDraftStep(ctx, {
-      type: 'create_qa_ticket',
-      title: 'QA ticket',
-      description: 'Skip QA ticket — missing development project/type.',
+      type: spec.stepType,
+      title: spec.title,
+      description: `No project/issue type known — revise the draft with the ${spec.label} project and issue type.`,
       skip: true,
       payload: null,
     });
-    setState(ctx, STATES.CREATE_DEPLOYMENT_TICKET);
+    setState(ctx, spec.next);
     return { continue: true };
   }
 
   const { issueType, parentKey } = resolveCreateTicketType(r);
   if (/sub[\s-]?task/i.test(String(r.development_issue_type || '')) && issueType === 'Task') {
-    warn(
-      ctx,
-      'Dev ticket is a Sub-task without a usable parent — creating QA as Task instead'
-    );
+    warn(ctx, `Dev ticket is a Sub-task without a usable parent — creating ${spec.label} as Task instead`);
   }
   const payload = {
     projectKey: r.development_project,
     issueType,
     parentKey: parentKey || undefined,
-    summary: ticketSummary('QA', ctx),
-    description: [
-      `QA for release ${r.next_version}`,
-      `Repository: ${r.repository}`,
-      `PR: ${r.source_pr || 'n/a'}`,
-      `Development: ${r.development_ticket || 'n/a'}`,
-      `Tag: ${r.next_version}`,
-    ].join('\n'),
+    summary: ticketSummary(kind === 'qa' ? 'QA' : 'Deploy', ctx),
+    description: spec.describe(ctx),
   };
 
   upsertDraftStep(ctx, {
-    type: 'create_qa_ticket',
-    title: 'Create QA ticket',
-    description: [
-      `Create Jira ${payload.issueType} in ${payload.projectKey}`,
-      parentKey ? `under parent ${parentKey}` : null,
-      `with summary "${payload.summary}".`,
-      'Description will include PR, repo, development ticket, and version.',
-    ]
-      .filter(Boolean)
-      .join(' '),
+    type: spec.stepType,
+    title: spec.title,
+    description: ticketStepDescription(payload),
     payload,
   });
-  audit(ctx, 'draft_plan_qa', payload);
-  setState(ctx, STATES.CREATE_DEPLOYMENT_TICKET);
-  return { continue: true, message: `Draft: plan QA ${payload.summary}` };
+  audit(ctx, `draft_plan_${kind}`, payload);
+  setState(ctx, spec.next);
+  return { continue: true, message: `Draft: plan ${spec.label} ${payload.summary}` };
 }
 
-/**
- * Planning state: add the Deployment-ticket create step to the draft.
- * Never reuses an existing ticket — every release gets a new Deploy ticket.
- */
-async function createDeploymentTicket(ctx) {
-  const r = ctx.release;
-  if (r.deployment_ticket && createdThisWorkflow(ctx, 'deployment_ticket')) {
-    setState(ctx, STATES.GENERATE_RELEASE_CONTEXT);
-    return { continue: true };
-  }
-  r.deployment_ticket = null;
-
-  if (!r.development_project || !r.development_issue_type) {
-    warn(ctx, 'Cannot create Deployment ticket — missing development project/type; skipping');
-    upsertDraftStep(ctx, {
-      type: 'create_deployment_ticket',
-      title: 'Deployment ticket',
-      description: 'Skip Deployment ticket — missing development project/type.',
-      skip: true,
-      payload: null,
-    });
-    setState(ctx, STATES.GENERATE_RELEASE_CONTEXT);
-    return { continue: true };
-  }
-
-  const { issueType, parentKey } = resolveCreateTicketType(r);
-  if (/sub[\s-]?task/i.test(String(r.development_issue_type || '')) && issueType === 'Task') {
-    warn(
-      ctx,
-      'Dev ticket is a Sub-task without a usable parent — creating Deployment as Task instead'
-    );
-  }
-  const payload = {
-    projectKey: r.development_project,
-    issueType,
-    parentKey: parentKey || undefined,
-    summary: ticketSummary('Deploy', ctx),
-    description: [
-      `Deployment for release ${r.next_version}`,
-      `Repository: ${r.repository}`,
-      `PR: ${r.source_pr || 'n/a'}`,
-      `Development: ${r.development_ticket || 'n/a'}`,
-      `QA: ${r.qa_ticket || 'n/a'}`,
-      `Tag: ${r.next_version}`,
-    ].join('\n'),
-  };
-
-  upsertDraftStep(ctx, {
-    type: 'create_deployment_ticket',
-    title: 'Create Deployment ticket',
-    description: [
-      `Create Jira ${payload.issueType} in ${payload.projectKey}`,
-      parentKey ? `under parent ${parentKey}` : null,
-      `with summary "${payload.summary}".`,
-      'Description will include PR, repo, development/QA tickets, and version.',
-    ]
-      .filter(Boolean)
-      .join(' '),
-    payload,
-  });
-  audit(ctx, 'draft_plan_deploy', payload);
-  setState(ctx, STATES.GENERATE_RELEASE_CONTEXT);
-  return { continue: true, message: `Draft: plan Deploy ${payload.summary}` };
-}
+const createQaTicket = (ctx) => planTicket(ctx, 'qa');
+const createDeploymentTicket = (ctx) => planTicket(ctx, 'deploy');
 
 // ---------------------------------------------------------------------------
 // Executors — called only after the user approved the draft and confirmed.
@@ -163,69 +112,49 @@ async function executeCreateTag(ctx, payload) {
   r.next_version = tag;
   r.github_tag_created = true;
   r.merge_commit = sha;
+  r.tag_url = `https://github.com/${owner}/${name}/releases/tag/${encodeURIComponent(tag)}`;
   setField(ctx, 'next_version', tag, { confidence: 'high', source: 'github_tag' });
   audit(ctx, 'tag_created', { tag, sha, url: result.url });
   markStepDone(ctx, 'create_tag');
   return {
-    text: `Created tag ${tag} on ${repo} @ ${sha}\n${result.url || result.html_url || ''}`,
+    text: `Created tag ${tag} on ${repo} @ ${sha}\n${r.tag_url}`,
     result,
   };
 }
 
-async function executeCreateQa(ctx, payload) {
+async function executeCreateTicket(ctx, payload, kind) {
+  const spec = TICKETS[kind];
   const jira = createJiraClient();
   let issueType = payload.issueType;
   let parentKey = payload.parentKey;
   // Repair older staged payloads that tried to create a bare Sub-task
-  if (/sub[\s-]?task/i.test(String(issueType || ''))) {
+  if (/sub[\s-]?task/i.test(String(issueType || '')) && !parentKey) {
     const resolved = resolveCreateTicketType(ctx.release);
     issueType = resolved.issueType;
     parentKey = resolved.parentKey || undefined;
   }
+  // Rebuilt at execution time so it reflects earlier steps (e.g. the new QA key).
+  const description = payload.description_custom ? payload.description : spec.describe(ctx);
   const created = await jira.createIssue({
     projectKey: payload.projectKey,
     summary: payload.summary,
     issueType,
-    description: payload.description,
+    description,
     parentKey,
   });
   const key = created.key;
-  ctx.release.qa_ticket = key;
-  setField(ctx, 'qa_ticket', key, { confidence: 'high', source: 'jira_create' });
-  audit(ctx, 'qa_ticket_created', { key, parentKey: parentKey || null, issueType });
-  markStepDone(ctx, 'create_qa_ticket');
+  ctx.release[spec.field] = key;
+  setField(ctx, spec.field, key, { confidence: 'high', source: 'jira_create' });
+  audit(ctx, `${spec.field}_created`, { key, parentKey: parentKey || null, issueType });
+  markStepDone(ctx, spec.stepType);
   return {
-    text: `Created QA ticket ${key} (${issueType}${parentKey ? `, parent ${parentKey}` : ''})\n${browseUrl(jira.baseUrl, key)}`,
+    text: `Created ${spec.label} ticket ${key} (${issueType}${parentKey ? `, parent ${parentKey}` : ''})\n${browseUrl(jira.baseUrl, key)}`,
     result: { key, browseUrl: browseUrl(jira.baseUrl, key) },
   };
 }
 
-async function executeCreateDeploy(ctx, payload) {
-  const jira = createJiraClient();
-  let issueType = payload.issueType;
-  let parentKey = payload.parentKey;
-  if (/sub[\s-]?task/i.test(String(issueType || ''))) {
-    const resolved = resolveCreateTicketType(ctx.release);
-    issueType = resolved.issueType;
-    parentKey = resolved.parentKey || undefined;
-  }
-  const created = await jira.createIssue({
-    projectKey: payload.projectKey,
-    summary: payload.summary,
-    issueType,
-    description: payload.description,
-    parentKey,
-  });
-  const key = created.key;
-  ctx.release.deployment_ticket = key;
-  setField(ctx, 'deployment_ticket', key, { confidence: 'high', source: 'jira_create' });
-  audit(ctx, 'deployment_ticket_created', { key, parentKey: parentKey || null, issueType });
-  markStepDone(ctx, 'create_deployment_ticket');
-  return {
-    text: `Created Deployment ticket ${key} (${issueType}${parentKey ? `, parent ${parentKey}` : ''})\n${browseUrl(jira.baseUrl, key)}`,
-    result: { key, browseUrl: browseUrl(jira.baseUrl, key) },
-  };
-}
+const executeCreateQa = (ctx, payload) => executeCreateTicket(ctx, payload, 'qa');
+const executeCreateDeploy = (ctx, payload) => executeCreateTicket(ctx, payload, 'deploy');
 
 module.exports = {
   createQaTicket,

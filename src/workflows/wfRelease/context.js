@@ -89,6 +89,8 @@ function createReleaseContext(seed = {}) {
       version_bump: null,
       version_reason: null,
       tag_skipped: false,
+      tag_url: null,
+      snyk_checks: [],
     },
     fields: {},
     draft: { steps: [], notes: [] },

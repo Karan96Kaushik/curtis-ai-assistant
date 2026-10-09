@@ -1,11 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { chat } = require('../../../integrations/aiRouter');
-const { setField, markUnknown, listUnresolved, FIELD_KEYS } = require('../fields');
+const { setField, markUnknown, listUnresolved } = require('../fields');
 const { audit, setState, STATES } = require('../context');
 const { warn, jiraLink } = require('../helpers');
 const store = require('../store');
-const { formatDraft } = require('../draft');
+const { formatDraft, formatReleaseForm } = require('../draft');
 
 // Release-form generation spec (field definitions + rules for the LLM). Loaded once and
 // injected into the checklist-generation system prompt so the draft follows the org's
@@ -19,31 +19,108 @@ const RELEASE_FORM_CONTEXT_PATH = path.join(
   'context',
   'release-form-context.txt'
 );
+const SPEC_MAX_CHARS = 14000;
 let releaseFormContextCache = null;
+
+/** The spec part of the file (engineering notes dropped, table padding collapsed). */
 function loadReleaseFormContext() {
   if (releaseFormContextCache != null) return releaseFormContextCache;
   try {
-    releaseFormContextCache = fs.readFileSync(RELEASE_FORM_CONTEXT_PATH, 'utf8');
-  } catch (err) {
+    const raw = fs.readFileSync(RELEASE_FORM_CONTEXT_PATH, 'utf8');
+    releaseFormContextCache = raw
+      .split(/^## Engineering notes/m)[0]
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/^\|( ?-+ ?\|)+$/gm, '|---|---|')
+      .slice(0, SPEC_MAX_CHARS);
+  } catch {
     releaseFormContextCache = '';
   }
   return releaseFormContextCache;
 }
 
-async function generateReleaseContext(ctx) {
+const LLM_FIELDS = [
+  'release_summary',
+  'technical_summary',
+  'feature_group',
+  'software_stack_changes',
+  'rollback_plan',
+  'risk',
+  'security',
+  'customer_impact',
+  'monitoring_owner',
+  'snyk_security',
+];
+
+const FAILING_STATES = new Set(['failure', 'error', 'timed_out', 'cancelled', 'action_required']);
+
+/**
+ * Snyk field from the PR's Snyk status/check-runs. A passing PR check only covers issues
+ * the PR introduced, so the value always asks for a Critical/High confirmation.
+ */
+function snykFromChecks(checks = []) {
+  if (!checks.length) return null;
+  const describe = (c) =>
+    `${c.name}${c.description ? ` — ${c.description}` : ''}${c.url ? ` (${c.url})` : ''}`;
+  const failing = checks.filter((c) => FAILING_STATES.has(c.state));
+  const pending = checks.filter((c) => ['pending', 'queued', 'in_progress'].includes(c.state));
+  if (failing.length) {
+    return `Snyk PR check failing: ${failing.map(describe).join('; ')}. Review the open issues and confirm whether any are Critical/High (and whether any were ignored) before release.`;
+  }
+  if (pending.length) {
+    return `Snyk PR check still running: ${pending.map(describe).join('; ')}. Re-check before release.`;
+  }
+  return `Snyk PR check passed: ${checks.map(describe).join('; ')}. Confirm in Snyk that no Critical/High issues are open on the project.`;
+}
+
+function heuristicDefaults(ctx) {
+  const r = ctx.release;
+  return {
+    release_summary: `Release ${r.next_version || ''} of ${r.component || r.repository || 'the component'}: ${r.pr_title || ctx._jira_dev_summary || 'see linked PR/Jira'}`.trim(),
+    technical_summary: r.commits?.length
+      ? r.commits
+          .slice(0, 8)
+          .map((c) => `- ${c.message?.split('\n')[0]}`)
+          .join('\n')
+      : null,
+    feature_group: 'N/A',
+    software_stack_changes: 'N/A',
+    rollback_plan: r.previous_version
+      ? `code update/rollback to ${r.previous_version}`
+      : 'code update/rollback to the previous production release',
+    risk: `Changes in ${r.component || 'this component'} may not behave as expected in production, affecting the functionality described in the release summary. Impact is limited to ${r.component || 'this component'}.`,
+    security: 'N/A — no evidence of changes to authentication, credentials, access control or sensitive data handling.',
+    customer_impact: 'N/A',
+    monitoring_owner: `${r.developer || 'Developer'} - ${r.component || 'the component'} - azure logs - post release`,
+  };
+}
+
+/**
+ * Fill every release-form field in one LLM pass. Fields the user edited on the draft are
+ * kept as-is. Thin evidence → best guess, flagged on the form (never Unknown).
+ * @param {object} ctx
+ * @param {{ notes?: string }} [opts] extra context from the user (draft "regenerate with …")
+ */
+async function populateFields(ctx, { notes } = {}) {
   const r = ctx.release;
 
   // Release Submission Date is deterministic — set once, not LLM-generated.
   if (!r.submission_date) {
     r.submission_date = new Date().toISOString().slice(0, 10);
   }
-  setField(ctx, 'submission_date', r.submission_date, { confidence: 'high', source: 'system' });
-  if (r.github_link) {
+  const userEdited = (key) => ctx.fields?.[key]?.source === 'user_draft_edit';
+  if (!userEdited('submission_date')) {
+    setField(ctx, 'submission_date', r.submission_date, { confidence: 'high', source: 'system' });
+  }
+  if (r.github_link && !userEdited('github_link')) {
     setField(ctx, 'github_link', r.github_link, { confidence: 'high', source: 'github' });
   }
+  if (notes) {
+    ctx.user_notes = [...(ctx.user_notes || []), String(notes).trim()];
+  }
 
-  // Gather ALL available context in one shot so the LLM can populate the entire
-  // draft's checklist/release-form fields together, instead of asking field-by-field.
+  const fixed = Object.fromEntries(
+    LLM_FIELDS.filter(userEdited).map((key) => [key, ctx.fields[key].value])
+  );
   const evidence = {
     repository: r.repository,
     component: r.component,
@@ -53,6 +130,7 @@ async function generateReleaseContext(ctx) {
     pr_body: (r.pr_body || '').slice(0, 2000),
     pr_merged: r.pr_merged,
     ci_status: r.ci_status,
+    snyk_checks: r.snyk_checks,
     reviewers: r.reviewers,
     commits: (r.commits || []).slice(0, 20).map((c) => c.message?.split('\n')[0]),
     changed_files: (r.changed_files || []).slice(0, 40),
@@ -67,8 +145,8 @@ async function generateReleaseContext(ctx) {
     version_bump: r.version_bump,
     version_reason: r.version_reason,
     tag_skipped: r.tag_skipped,
-    qa_ticket: r.qa_ticket,
-    deployment_ticket: r.deployment_ticket,
+    user_notes: ctx.user_notes || [],
+    fields_set_by_user: fixed,
     warnings: ctx.warnings,
   };
 
@@ -81,16 +159,21 @@ async function generateReleaseContext(ctx) {
         {
           role: 'system',
           content: [
-            'You are drafting a complete release plan/form. Given ALL of the context evidence below at once',
-            '(PR, Jira, commits, files, CI, version), write every release-form field in a single pass,',
+            'You are drafting a complete release form. Given ALL of the context evidence below at once',
+            '(PR, Jira, commits, files, CI, Snyk checks, version, user notes), write every release-form field in a single pass,',
             'following the field definitions and generation rules in the release form specification below.',
             '',
-            formSpec ? `RELEASE FORM SPECIFICATION:\n${formSpec.slice(0, 6000)}` : '',
+            formSpec ? `RELEASE FORM SPECIFICATION:\n${formSpec}` : '',
             '',
-            'Reply with JSON only: {"release_summary","technical_summary","feature_group",' +
-              '"software_stack_changes","snyk_security","rollback_plan","risk","security","customer_impact","monitoring_owner"}.',
-            'Use null when genuinely unknown or not applicable — the caller will substitute "N/A" or flag it for a human.',
-            'Do not invent ticket keys, versions, URLs, security-scan results, or approvals — use only the evidence given.',
+            `Reply with JSON only: {${LLM_FIELDS.map((k) => `"${k}"`).join(',')},"guessed":[]}.`,
+            'Every field must have a value. When the evidence is thin or unclear, give your best guess from what is available',
+            'and list that field\'s key in "guessed" so a human can verify it. Use "N/A" only when a field genuinely does not apply.',
+            'Never use "N/A" for release_summary, rollback_plan, or monitoring_owner. Match the worked examples:',
+            'rollback is "code update/rollback" (name the previous version) or "turn off using MAF params";',
+            'monitoring is who + what + when, as one line or a numbered per-function list.',
+            'snyk_security: when the evidence names a High or Critical package, write it like the worked examples (severity, manifest, package, subdep / not directly referenced / no update). Use null when the evidence has no package-level finding — do not invent package names.',
+            'user_notes are authoritative extra context from the developer. Keep fields_set_by_user exactly as given.',
+            'Never invent ticket keys, versions, URLs, security-scan results, or approvals — those come only from the evidence.',
           ]
             .filter(Boolean)
             .join('\n'),
@@ -105,45 +188,34 @@ async function generateReleaseContext(ctx) {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) generated = JSON.parse(jsonMatch[0]);
   } catch (err) {
-    warn(ctx, `LLM release summary failed: ${err.message}`);
+    warn(ctx, `LLM release form generation failed: ${err.message}`);
   }
 
-  const defaults = {
-    release_summary:
-      generated?.release_summary ||
-      `Release ${r.next_version || ''} for ${r.component || r.repository || 'component'}: ${r.pr_title || ctx._jira_dev_summary || 'see linked PR/Jira'}`.trim(),
-    technical_summary:
-      generated?.technical_summary ||
-      (r.commits?.length
-        ? r.commits
-            .slice(0, 8)
-            .map((c) => `- ${c.message?.split('\n')[0]}`)
-            .join('\n')
-        : null),
-    feature_group: generated?.feature_group || 'N/A',
-    software_stack_changes: generated?.software_stack_changes || 'N/A',
-    // No Snyk integration exists yet — never let the LLM guess a scan result.
-    snyk_security:
-      generated?.snyk_security ||
-      'Not verified — no Snyk scan data available; manual check required before release.',
-    rollback_plan:
-      generated?.rollback_plan ||
-      (r.previous_version ? `Redeploy ${r.previous_version}` : null),
-    risk: generated?.risk || 'Low — standard release',
-    security: generated?.security || null,
-    customer_impact: generated?.customer_impact || null,
-    monitoring_owner: generated?.monitoring_owner || r.developer || null,
-  };
-
-  for (const [key, value] of Object.entries(defaults)) {
-    if (value != null && value !== '') {
-      setField(ctx, key, value, {
-        confidence: generated?.[key] ? 'medium' : 'low',
-        source: generated?.[key] ? 'llm' : 'heuristic',
-      });
-    } else {
+  const guessed = new Set(Array.isArray(generated?.guessed) ? generated.guessed : []);
+  const fallback = heuristicDefaults(ctx);
+  for (const key of LLM_FIELDS) {
+    if (userEdited(key)) continue;
+    const llmValue = generated?.[key];
+    const value = present(llmValue) ? String(llmValue).trim() : fallback[key];
+    if (!present(value)) {
       markUnknown(ctx, key);
+      continue;
     }
+    setField(ctx, key, value, {
+      confidence: present(llmValue) ? 'medium' : 'low',
+      source: present(llmValue) ? 'llm' : 'heuristic',
+      guess: present(llmValue) ? guessed.has(key) : true,
+    });
+  }
+
+  if (!userEdited('snyk_security') && !packageLevelSnyk(generated?.snyk_security)) {
+    const snyk = snykFromChecks(r.snyk_checks);
+    setField(
+      ctx,
+      'snyk_security',
+      snyk || 'Not verified — no Snyk check found on the PR; check Snyk for open Critical/High issues before release.',
+      { confidence: snyk ? 'medium' : 'low', source: snyk ? 'github_snyk_check' : 'none' }
+    );
   }
 
   // Sync known release fields into fields map
@@ -151,8 +223,6 @@ async function generateReleaseContext(ctx) {
     'repository',
     'component',
     'developer',
-    'github_link',
-    'submission_date',
     'source_pr',
     'source_branch',
     'merge_commit',
@@ -162,24 +232,27 @@ async function generateReleaseContext(ctx) {
     'qa_ticket',
     'deployment_ticket',
   ]) {
-    if (r[key] != null && r[key] !== '') {
-      // Don't overwrite a key this workflow already created in Jira.
-      if (ctx.fields?.[key]?.source === 'jira_create') continue;
+    if (r[key] != null && r[key] !== '' && !ctx.fields?.[key]) {
       setField(ctx, key, r[key], { confidence: 'high', source: 'context' });
     }
   }
 
-  audit(ctx, 'generate_release_context');
+  ctx.unknown_fields = listUnresolved(ctx);
+  audit(ctx, 'populate_fields', { notes: notes || null, guessed: [...guessed] });
+}
 
-  // Surface unresolved fields in the draft instead of asking one by one —
-  // the user fixes them via wf_release_revise_draft during review.
-  const unresolved = listUnresolved(ctx);
-  ctx.unknown_fields = unresolved;
-  for (const key of unresolved) {
-    if (!ctx.fields?.[key] || ctx.fields[key].source === 'unknown') {
-      markUnknown(ctx, key);
-    }
-  }
+function present(v) {
+  return v != null && String(v).trim() !== '';
+}
+
+/** A Snyk value that names a finding. N/A leaves the PR-check fallback in place. */
+function packageLevelSnyk(v) {
+  if (!present(v)) return false;
+  return !/^(n\/a|null|none|unknown)$/i.test(String(v).trim());
+}
+
+async function generateReleaseContext(ctx) {
+  await populateFields(ctx);
   setState(ctx, STATES.DRAFT_REVIEW);
   audit(ctx, 'draft_ready');
   return {
@@ -208,63 +281,36 @@ async function validate(ctx) {
   if (!r.github_tag_created || !r.next_version) {
     warnings.push(r.tag_skipped ? 'Git tag skipped by user' : 'Git tag missing');
   }
-  if (!r.qa_ticket) warnings.push('QA ticket missing');
-  if (!r.deployment_ticket) warnings.push('Deployment ticket missing');
+  if (!r.qa_ticket) warnings.push('QA ticket not created');
+  if (!r.deployment_ticket) warnings.push('Deployment ticket not created');
   if (!r.development_ticket) warnings.push('Development ticket missing');
 
   for (const w of warnings) warn(ctx, w);
 
-  const hardMissing =
-    !r.tag_skipped && (!r.github_tag_created || !r.next_version);
-  if (r.tag_skipped && !r.github_tag_created) {
-    warn(ctx, 'Git tag was skipped by user');
-  }
+  const hardMissing = !r.tag_skipped && (!r.github_tag_created || !r.next_version);
   audit(ctx, 'validated', { warnings: ctx.warnings, hardMissing });
 
   if (hardMissing) {
     return {
       pause: 'user_input',
-      message: `Validation blocked: git tag required before export.\nWarnings:\n${(ctx.warnings || []).map((w) => `- ${w}`).join('\n')}`,
+      message: `Validation blocked: git tag required before export (or skip the tag on the draft).\nWarnings:\n${(ctx.warnings || []).map((w) => `- ${w}`).join('\n')}`,
     };
   }
 
   setState(ctx, STATES.EXPORT);
-  return { continue: true, message: `Validation passed with ${(ctx.warnings || []).length} warning(s).` };
+  return { continue: true };
 }
-
-// Reviewer roles from the org's release-form template. Status/comments/date/name are only
-// ever filled from actual review evidence — never fabricated (see release-form-context.txt).
-const REVIEW_ROLES = [
-  { role: 'Any' },
-  { role: 'Dev Lead (Atakan)' },
-  { role: 'Functional Lead (Henry)' },
-  { role: 'Release Lead (Pranab)' },
-];
 
 async function exportArtifacts(ctx) {
   const r = ctx.release;
   const dir = store.RELEASES_DIR;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
+  const form = formatReleaseForm(ctx, { final: true });
   const checklist = [
-    '# Release Checklist',
+    `# Release form — ${r.component || r.repository || ''} ${r.next_version || ''}`.trim(),
     '',
-    ...FIELD_KEYS.map((key) => {
-      const entry = ctx.fields?.[key];
-      let value = entry?.value ?? r[key] ?? 'Unknown';
-      if (
-        ['development_ticket', 'qa_ticket', 'deployment_ticket'].includes(key) &&
-        value &&
-        value !== 'Unknown'
-      ) {
-        value = jiraLink(value);
-      }
-      return `- **${key}**: ${value} _(confidence=${entry?.confidence || '?'}, source=${entry?.source || '?'})_`;
-    }),
-    '',
-    '## Review metadata',
-    '_Status/comments/date/name are left blank unless there is actual reviewer evidence — never fabricated._',
-    ...REVIEW_ROLES.map((rev) => `- **${rev.role}**: Status=Pending, Reviewer Name=—, Comments=—, Date=—`),
+    form,
     '',
     '## Warnings',
     ...(ctx.warnings || []).map((w) => `- ${w}`),
@@ -289,7 +335,7 @@ async function exportArtifacts(ctx) {
     `Feature group: ${r.feature_group || 'N/A'}`,
     `Repository: ${r.repository}`,
     `GitHub: ${r.github_link || 'n/a'}`,
-    `Tag: ${r.next_version}`,
+    `Tag: ${r.next_version}${r.tag_url ? ` (${r.tag_url})` : ''}`,
     `PR: ${r.source_pr || 'n/a'}`,
     `Dev: ${jiraLink(r.development_ticket) || 'n/a'}`,
     `QA: ${jiraLink(r.qa_ticket) || 'n/a'}`,
@@ -304,7 +350,7 @@ async function exportArtifacts(ctx) {
     `Risk: ${r.risk || 'n/a'}`,
     `Release security: ${r.security || 'n/a'}`,
     `Snyk security: ${r.snyk_security || 'n/a'}`,
-    `Monitoring owner: ${r.monitoring_owner || 'n/a'}`,
+    `Monitoring: ${r.monitoring_owner || 'n/a'}`,
     `Merge commit: ${r.merge_commit || 'n/a'}`,
     `CI: ${r.ci_status || 'unknown'}`,
   ].join('\n');
@@ -330,18 +376,13 @@ async function exportArtifacts(ctx) {
   return {
     pause: 'complete',
     message: [
-      `Release workflow complete: ${ctx.workflow.id}`,
-      `Tag: ${r.next_version}`,
-      `Dev: ${jiraLink(r.development_ticket) || 'n/a'}`,
-      `QA: ${jiraLink(r.qa_ticket) || 'n/a'}`,
-      `Deploy: ${jiraLink(r.deployment_ticket) || 'n/a'}`,
+      `# Release form — ${r.component || r.repository || ''} ${r.next_version || ''}`.trim(),
+      `_Workflow ${ctx.workflow.id} complete. Fields marked "best guess" need a quick check before submitting._`,
       '',
-      'Artifacts:',
-      `- ${paths.checklist}`,
-      `- ${paths.releaseNotes}`,
-      `- ${paths.deployment}`,
+      form,
+      ...(ctx.warnings?.length ? ['', '**Warnings**', ...ctx.warnings.map((w) => `- ${w}`)] : []),
       '',
-      checklist.slice(0, 3500),
+      `Saved: ${paths.checklist}`,
     ].join('\n'),
     done: true,
   };
@@ -373,6 +414,9 @@ async function recover(ctx) {
 
 module.exports = {
   generateReleaseContext,
+  populateFields,
+  snykFromChecks,
+  loadReleaseFormContext,
   draftReview,
   validate,
   exportArtifacts,

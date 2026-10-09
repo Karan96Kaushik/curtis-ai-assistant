@@ -147,6 +147,14 @@ function buildSummary(tool, args) {
   }
   if (tool === 'wf_release_execute_pending') {
     const payload = args.payload || {};
+    if (args.type === 'execute_step' && payload.step) {
+      const s = payload.step;
+      const detail = s.payload?.summary || s.payload?.tag || '';
+      return [
+        `Release step: ${s.title || s.type}${detail ? ` — ${detail}` : ''}`,
+        `- Workflow: ${args.workflowId || '?'}`,
+      ].join('\n');
+    }
     const steps = (payload.steps || []).filter((s) => !s.skip && s.payload);
     const lines = [
       'Execute release draft',

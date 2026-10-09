@@ -1,0 +1,376 @@
+{
+  "workflow": {
+    "id": "wf-mv0wldwc-uts8wf",
+    "state": "DRAFT_REVIEW",
+    "previous_state": "DRAFT_REVIEW",
+    "started_at": "2026-10-09T11:50:08.024Z",
+    "updated_at": "2026-10-09T11:50:08.048Z",
+    "resume_state": null,
+    "mode": "draft",
+    "executing": false
+  },
+  "release": {
+    "repository": "o/func_x",
+    "component": "FuncX",
+    "source_pr": 21,
+    "source_branch": "feature/x",
+    "merge_commit": "mergesha",
+    "developer": "Karan Kaushik",
+    "development_ticket": "P25-100",
+    "development_project": "P25",
+    "development_issue_type": "Task",
+    "development_parent_key": null,
+    "qa_ticket": null,
+    "deployment_ticket": null,
+    "previous_version": "v2.4.0",
+    "next_version": "v2.5.0",
+    "github_tag_created": false,
+    "github_link": "https://github.com/o/func_x/pull/21",
+    "feature_group": "N/A",
+    "submission_date": "2026-10-09",
+    "release_summary": "Improves DB error handling",
+    "technical_summary": "x",
+    "software_stack_changes": "N/A",
+    "snyk_security": "Snyk PR check failing: security/snyk (PNFPS) — 1 high issue (https://app.snyk.io/x). Review the open issues and confirm whether any are Critical/High (and whether any were ignored) before release.",
+    "rollback_plan": "code update/rollback to v2.4.0",
+    "risk": "r",
+    "security": "N/A",
+    "customer_impact": "N/A",
+    "monitoring_owner": "Karan - azure logs - 24h",
+    "checklist_complete": false,
+    "pr_merged": true,
+    "ci_status": "success",
+    "pr_title": "Feature/db error handling",
+    "pr_body": "Fixes P25-100",
+    "reviewers": [],
+    "commits": [
+      {
+        "sha": "a",
+        "message": "fix db errors",
+        "author": "K"
+      }
+    ],
+    "changed_files": [
+      "app.py"
+    ],
+    "version_bump": "minor",
+    "version_reason": "Feature / enhancement indicators in PR/commits",
+    "tag_skipped": false,
+    "tag_url": null,
+    "snyk_checks": [
+      {
+        "name": "security/snyk (PNFPS)",
+        "state": "error",
+        "url": "https://app.snyk.io/x",
+        "description": "1 high issue"
+      }
+    ],
+    "_pr_html_url": "https://github.com/o/func_x/pull/21"
+  },
+  "fields": {
+    "repository": {
+      "value": "o/func_x",
+      "confidence": "high",
+      "source": "github",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.034Z"
+    },
+    "component": {
+      "value": "FuncX",
+      "confidence": "high",
+      "source": "user_draft_edit",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.047Z"
+    },
+    "source_pr": {
+      "value": 21,
+      "confidence": "high",
+      "source": "user",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.033Z"
+    },
+    "source_branch": {
+      "value": "feature/x",
+      "confidence": "high",
+      "source": "github_pr",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.034Z"
+    },
+    "merge_commit": {
+      "value": "mergesha",
+      "confidence": "high",
+      "source": "github_pr",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.034Z"
+    },
+    "developer": {
+      "value": "Karan Kaushik",
+      "confidence": "high",
+      "source": "jira_assignee",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.035Z"
+    },
+    "github_link": {
+      "value": "https://github.com/o/func_x/pull/21",
+      "confidence": "high",
+      "source": "github",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.037Z"
+    },
+    "development_ticket": {
+      "value": "P25-100",
+      "confidence": "high",
+      "source": "jira",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.035Z"
+    },
+    "previous_version": {
+      "value": "v2.4.0",
+      "confidence": "high",
+      "source": "github_tags",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.036Z"
+    },
+    "next_version": {
+      "value": "v2.5.0",
+      "confidence": "medium",
+      "source": "semver_infer",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.036Z"
+    },
+    "submission_date": {
+      "value": "2026-10-09",
+      "confidence": "high",
+      "source": "system",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.037Z"
+    },
+    "release_summary": {
+      "value": "Improves DB error handling",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "technical_summary": {
+      "value": "x",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "feature_group": {
+      "value": "N/A",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "software_stack_changes": {
+      "value": "N/A",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "rollback_plan": {
+      "value": "code update/rollback to v2.4.0",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "risk": {
+      "value": "r",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": true,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "security": {
+      "value": "N/A",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "customer_impact": {
+      "value": "N/A",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "monitoring_owner": {
+      "value": "Karan - azure logs - 24h",
+      "confidence": "medium",
+      "source": "llm",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    },
+    "snyk_security": {
+      "value": "Snyk PR check failing: security/snyk (PNFPS) — 1 high issue (https://app.snyk.io/x). Review the open issues and confirm whether any are Critical/High (and whether any were ignored) before release.",
+      "confidence": "medium",
+      "source": "github_snyk_check",
+      "guess": false,
+      "updated_at": "2026-10-09T11:50:08.041Z"
+    }
+  },
+  "draft": {
+    "steps": [
+      {
+        "type": "create_tag",
+        "title": "Create Git tag",
+        "description": "Create annotated tag `v2.5.0` on `o/func_x` at commit `mergesha`. Bump: minor (Feature / enhancement indicators in PR/commits). Previous tag: v2.4.0.",
+        "payload": {
+          "repo": "o/func_x",
+          "tag": "v2.5.0",
+          "sha": "mergesha",
+          "message": "Release v2.5.0",
+          "bump": "minor",
+          "reason": "Feature / enhancement indicators in PR/commits",
+          "previous_version": "v2.4.0"
+        },
+        "skip": false,
+        "done": false
+      },
+      {
+        "type": "create_qa_ticket",
+        "title": "Create QA ticket",
+        "description": "Create Jira QAlity Test in P25 with summary \"TEST FuncX v2.5.0\".",
+        "payload": {
+          "projectKey": "P25",
+          "issueType": "QAlity Test",
+          "summary": "TEST FuncX v2.5.0",
+          "description": "QA for release v2.5.0\nRepository: o/func_x\nPR: 21\nDevelopment: P25-100\nTag: v2.5.0"
+        },
+        "skip": false,
+        "done": false
+      },
+      {
+        "type": "create_deployment_ticket",
+        "title": "Create Deployment ticket",
+        "description": "Create Jira Task in P25 with summary \"Deploy custom\".",
+        "payload": {
+          "projectKey": "P25",
+          "issueType": "Task",
+          "summary": "Deploy custom",
+          "description": "Deployment for release v2.5.0\nRepository: o/func_x\nPR: 21\nDevelopment: P25-100\nQA: n/a\nTag: v2.5.0",
+          "summary_custom": true
+        },
+        "skip": false,
+        "done": false
+      }
+    ],
+    "notes": []
+  },
+  "pending_action": null,
+  "unknown_fields": [],
+  "warnings": [],
+  "audit_log": [
+    {
+      "at": "2026-10-09T11:50:08.029Z",
+      "state": "START",
+      "event": "started",
+      "input": {
+        "repository": "o/func_x",
+        "owner": "o",
+        "repoName": "func_x",
+        "source_pr": 21,
+        "source_branch": null,
+        "development_ticket": null,
+        "text": "",
+        "skip_tag": false
+      }
+    },
+    {
+      "at": "2026-10-09T11:50:08.033Z",
+      "state": "IDENTIFY_SOURCE",
+      "event": "source_identified",
+      "repository": "o/func_x",
+      "source_pr": 21,
+      "development_ticket": null
+    },
+    {
+      "at": "2026-10-09T11:50:08.035Z",
+      "state": "READ_GITHUB",
+      "event": "read_github_complete",
+      "pr": 21,
+      "merge_commit": "mergesha",
+      "tags": 2
+    },
+    {
+      "at": "2026-10-09T11:50:08.035Z",
+      "state": "READ_JIRA",
+      "event": "read_jira_complete",
+      "development_ticket": "P25-100",
+      "project": "P25",
+      "type": "Task"
+    },
+    {
+      "at": "2026-10-09T11:50:08.037Z",
+      "state": "DETERMINE_VERSION",
+      "event": "draft_plan_tag",
+      "repo": "o/func_x",
+      "tag": "v2.5.0",
+      "sha": "mergesha",
+      "message": "Release v2.5.0",
+      "bump": "minor",
+      "reason": "Feature / enhancement indicators in PR/commits",
+      "previous_version": "v2.4.0"
+    },
+    {
+      "at": "2026-10-09T11:50:08.037Z",
+      "state": "CREATE_QA_TICKET",
+      "event": "draft_plan_qa",
+      "projectKey": "P25",
+      "issueType": "Task",
+      "summary": "TEST func_x v2.5.0",
+      "description": "QA for release v2.5.0\nRepository: o/func_x\nPR: 21\nDevelopment: P25-100\nTag: v2.5.0"
+    },
+    {
+      "at": "2026-10-09T11:50:08.037Z",
+      "state": "CREATE_DEPLOYMENT_TICKET",
+      "event": "draft_plan_deploy",
+      "projectKey": "P25",
+      "issueType": "Task",
+      "summary": "Deploy func_x v2.5.0 to Prod",
+      "description": "Deployment for release v2.5.0\nRepository: o/func_x\nPR: 21\nDevelopment: P25-100\nQA: n/a\nTag: v2.5.0"
+    },
+    {
+      "at": "2026-10-09T11:50:08.041Z",
+      "state": "GENERATE_RELEASE_CONTEXT",
+      "event": "populate_fields",
+      "notes": null,
+      "guessed": [
+        "risk"
+      ]
+    },
+    {
+      "at": "2026-10-09T11:50:08.041Z",
+      "state": "DRAFT_REVIEW",
+      "event": "draft_ready"
+    },
+    {
+      "at": "2026-10-09T11:50:08.048Z",
+      "state": "DRAFT_REVIEW",
+      "event": "draft_revised",
+      "patch": {
+        "id": "wf-mv0wldwc-uts8wf",
+        "qa_issue_type": "QAlity Test",
+        "deploy_summary": "Deploy custom",
+        "component": "FuncX"
+      },
+      "ignored": []
+    }
+  ],
+  "export_paths": null,
+  "_tags": [
+    "v2.3.0",
+    "v2.4.0"
+  ],
+  "_jira_dev_summary": "DB errors",
+  "_jira_dev_description": null,
+  "_jira_dev_status": "Done",
+  "_jira_dev_browse": "https://example.atlassian.net/browse/P25-100"
+}

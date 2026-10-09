@@ -48,12 +48,15 @@ function isUserCancellation(text, pending = null) {
   const t = String(text || '').trim();
   if (!t || t.length > 120) return false;
   if (CANCEL_RE.test(t)) return true;
-  // Bare "skip" or "skip tag …" while a release action is staged
-  if (pending?.tool === 'wf_release_execute_pending' && /^skip\b/i.test(t)) {
+  // Bare "skip" while a release write is staged. "skip the QA ticket" names a step, so it
+  // goes through the LLM (revise_draft) instead of skipping whatever is staged.
+  if (pending?.tool === 'wf_release_execute_pending' && BARE_SKIP_RE.test(t)) {
     return true;
   }
   return false;
 }
+
+const BARE_SKIP_RE = /^skip(\s+(it|this|that|(this|the)\s+(one|step)))?\s*[.!]*$/i;
 
 function lastWorkflowIdFromHistory(history) {
   const { extractWorkflowId } = require('../modules/release');
@@ -495,7 +498,9 @@ async function handleUserMessage(input) {
         if (pending.tool === 'wf_release_execute_pending') {
           // Drop the cancelled stage first; reject may stage the *next* release step.
           pendingActions.clear(channelId, userId);
-          const releaseReject = await rejectIfReleasePending(pending, turnCtx);
+          const releaseReject = await rejectIfReleasePending(pending, turnCtx, {
+            skip: BARE_SKIP_RE.test(String(text || '').trim()),
+          });
           const reply =
             releaseReject?.text ||
             `Skipped pending release action:\n${pending.summary}`;

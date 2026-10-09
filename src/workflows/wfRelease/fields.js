@@ -31,12 +31,17 @@ const FIELD_KEYS = [
 const SKIPPED = 'Skipped by user';
 const UNKNOWN = 'Unknown';
 
-function setField(ctx, key, value, { confidence = 'medium', source = 'inferred' } = {}) {
+/**
+ * @param {{ confidence?: string, source?: string, guess?: boolean }} [opts]
+ *   guess — value is a best guess from thin evidence; the form flags it for review.
+ */
+function setField(ctx, key, value, { confidence = 'medium', source = 'inferred', guess = false } = {}) {
   if (!ctx.fields) ctx.fields = {};
   ctx.fields[key] = {
     value,
     confidence,
     source,
+    guess: Boolean(guess),
     updated_at: new Date().toISOString(),
   };
   if (ctx.release && Object.prototype.hasOwnProperty.call(ctx.release, key)) {

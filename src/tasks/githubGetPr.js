@@ -25,11 +25,13 @@ function summarizeChecks(combined, runs) {
       name: r.name,
       state: r.status !== 'completed' ? r.status : r.conclusion || 'unknown',
       url: r.html_url || null,
+      description: r.output?.title || null,
     })),
     ...(combined?.statuses || []).map((s) => ({
       name: s.context,
       state: s.state,
       url: s.target_url || null,
+      description: s.description || null,
     })),
   ];
   const failing = checks.filter((c) => ['failure', 'error', 'timed_out', 'cancelled', 'action_required'].includes(c.state));

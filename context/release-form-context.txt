@@ -4,7 +4,67 @@ Below is a **context/specification you can give to the AI agent**. It defines wh
 
 The AI agent is responsible for automatically completing a software release form from available release information such as Jira tickets, GitHub changes, release notes, QA results, deployment tickets, security scans, and information supplied by the developer.
 
-The agent should **not invent information**. If a field cannot be determined from the available evidence, it should return `N/A` or flag the field as requiring human input.
+Every field must be filled. When the evidence for a field is thin or unclear, the agent gives its **best guess** from what is available and marks it as a best guess so a human can verify it. Use `N/A` only when a field genuinely does not apply. The agent must still **never invent** ticket keys, links, versions, security-scan results, or approvals.
+
+**Release Summary**, **Release rollback / backout plan**, and **Post-release monitoring** are the exception: always fill them. Do not use `N/A`, null, or a blank. Write them from the evidence, in the same shape as the worked examples below. Do not copy an example's person, component, or failure unless that is what this release actually changes.
+
+### Worked examples — rollback / backout
+
+State a concrete backout action. Either roll the code back, or turn the change off with MAF parameters when the release is gated that way:
+
+- code update/rollback
+- turn off using MAF params
+
+When a previous version is known, name it (for example `code update/rollback to v2.0.1`).
+
+### Worked examples — release risks
+
+State what fails. When several functions have separate codebases, say that an update in one should not affect the others, then list the functions this release still touches:
+
+```text
+Smarcharging profiles/allocations don't go out correctly. All functions of the CC FA have separate codebase so updates in one should not affect others but adding it here:
+1. ERCP
+2. Current allocation trigger
+3. charge profile JSON generation
+4. VSM controller
+5. new optimser trigger
+```
+
+Shorter forms used on the form:
+
+- Smarcharging profiles/allocations don't go out correctly
+- recommendations fail to be sent
+
+### Worked examples — post-release monitoring
+
+Always name who monitors, what they check, and when. One line is enough when a single check covers the release. Use a numbered list when each function is checked on its own schedule.
+
+```text
+Karan Kaushik - ercp reports + azure logs - 10 pm post release
+```
+
+```text
+Karan Kaushik
+1. ercp: 10 pm - logs + report
+2. charge profile gen: post release (every 5 min) - az logs
+3. VSM: post release (every 1 min) - az logs
+4. current allocation: early morning - t_route_allocated + az logs
+5. new optimiser trigger: early morning post MAF activation - t_route_allocated + az logs
+```
+
+```text
+Karan Kaushik
+1. Allocation activation: early morning post MAF activation in t_route_allocated + azure logs
+2. Smartcharging activation: post MAF activation (every 5 mins) in t_scheduler + azure logs
+```
+
+### Worked examples — Snyk security issues
+
+When a High or Critical finding is in the evidence, name the severity, the manifest, the package, and whether it is a direct dependency. Sub-dependencies with no available update should say that. Do not name a package unless the evidence mentions it.
+
+- high vuln in requirements.txt from urllib3 which is not directly referenced
+- 1 high vuln in requirements.txt werkzeug package. No update available since it's a subdep
+- pyjwt, cryptography, urllib3 introduced through azure deps, no available update for subdeps
 
 The release form contains the following fields:
 
@@ -13,7 +73,7 @@ The release form contains the following fields:
 | **Release #**                                  | The release/version number. Determine the new release version from the release information, e.g. `v2.0.2`. If the form requires a previous/current release relationship, identify the previous release separately. Never output spreadsheet errors such as `#VALUE!`.                                                                                                                                                                                                                                  |
 | **Developer**                                  | Name of the developer responsible for the release/change. Example: `Karan Kaushik`.                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **Component**                                  | The application, service, function, module, or component being released. Example: `Vehicle FCMS option generator`.                                                                                                                                                                                                                                                                                                                                                                                     |
-| **Release Summary**                            | A concise description of what changed in this release. Include the problem being fixed, feature being added, enhancement being made, or behaviour being changed. It should be understandable to a functional/non-technical reviewer. Example: `Code fix for plan date check in t_route_plan + prod test mode`.                                                                                                                                                                                         |
+| **Release Summary**                            | Always fill. A concise description of what changed in this release. Include the problem being fixed, feature being added, enhancement being made, or behaviour being changed. It should be understandable to a functional/non-technical reviewer. Do not use `N/A`. Example: `Code fix for plan date check in t_route_plan + prod test mode`.                                                                                                                                                                                         |
 | **Product Release - Feature Group**            | The relevant product feature group if one exists. If the release belongs to a known feature area, provide its name. If not applicable, use `N/A`. The template example references `Alert self service` as an example feature group.                                                                                                                                                                                                                                                                    |
 | **Release Submission Date**                    | The date the release is being submitted for review. Use a consistent date format, preferably `DD/MM/YYYY` or `YYYY-MM-DD`.                                                                                                                                                                                                                                                                                                                                                                             |
 | **Previous release #**                         | The immediately preceding production release/version. Example: `v2.0.1`.                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -23,12 +83,12 @@ The release form contains the following fields:
 | **QAlity test ref**                            | Always a **new** QA ticket created for this release (never reuse a previous QA ticket, even if one is linked to the development ticket). The draft should propose creating it; the key/link is filled after creation. Example: `P25-3717`. |
 | **Jira Task for deployment to prod**           | Always a **new** production-deployment ticket created for this release (never reuse a previous Deploy ticket). The draft should propose creating it; the key/link is filled after creation. Example: `P25-3718`. |
 | **Changes to software stack**                  | Describe changes to the application's technology/runtime/dependencies/infrastructure stack. This includes new libraries, upgraded versions, database technology changes, cloud services, architecture changes, etc. If there are no stack changes, use `N/A`. Example: `N/A`.                                                                                                                                                                                                                          |
-| **Snyk security issues**                       | State whether there are any open **Critical or High** security vulnerabilities identified by Snyk. If vulnerabilities exist, identify them and explain their status. If a Critical/High issue has been ignored, explicitly mention that. If there are only lower-level/sub-dependency issues with no available update, state that clearly. Example: `All raised issues are sub dependencies - no available update`.                                                                                    |
-| **Release risks**                              | Identify what could go wrong because of this release and the potential impact. This should be specific to the changes being released. Cover affected functionality, users/customers, integrations, data, or operational processes. Avoid vague statements such as `issues with FCMS options`. Example structure: `Potential issues with FCMS vehicle allocation options may result in incorrect or unexpected vehicle allocation recommendations. Impact is limited to FCMS allocation functionality.` |
-| **Release rollback / backout plan**            | Explain how the release can be reversed if problems occur. Include the previous stable release/version where known, what will be rolled back, and any database/configuration considerations. Example: `Rollback to previous stable release v2.0.1 and redeploy the application. Verify FCMS allocation functionality following rollback.`                                                                                                                                                              |
+| **Snyk security issues**                       | State whether there are any open **Critical or High** security vulnerabilities identified by Snyk. If vulnerabilities exist, identify them and explain their status. If a Critical/High issue has been ignored, explicitly mention that. If a High or Critical issue is only a sub-dependency with no available update, say that in the shape of the worked examples: severity, manifest (for example `requirements.txt`), package, and that it is not directly referenced or was introduced through another dependency. Do not name a package that is not in the evidence.                                                                                    |
+| **Release risks**                              | Identify what could go wrong because of this release and the potential impact. This should be specific to the changes being released. Cover affected functionality, users/customers, integrations, data, or operational processes. Avoid vague statements such as `issues with FCMS options`. Follow the worked examples: name the failure, and when functions have separate codebases list each one this release can affect (for example ERCP, current allocation trigger, charge profile JSON generation, VSM controller, new optimser trigger). |
+| **Release rollback / backout plan**            | Always fill. Explain how the release can be reversed if problems occur. Use `code update/rollback` (name the previous version when known) or `turn off using MAF params` when the change is MAF-gated. Do not use `N/A`. |
 | **Potential to contact the customer directly** | State whether the release could require direct communication with a customer through email, text, message, etc., excluding dashboard communication. Explain briefly why. If there is no such requirement, use `N/A`. Example: `N/A` or `Customer may need to be contacted if allocation issues affect their operation.`                                                                                                                                                                                |
 | **Release security**                           | Explain whether the release affects security, authentication/authorisation, personal/client-sensitive data, credentials, secrets, access controls, or data handling. If there is no security or sensitive-data impact, state `N/A`.                                                                                                                                                                                                                                                                    |
-| **Post-release monitoring**                    | Specify **who** will monitor the release, **what** will be monitored, and **when/how long** it will be monitored. Include relevant application logs, errors, metrics, functionality, integrations, or customer impact. Example: `Karan Kaushik – monitor FCMS option generation, vehicle allocation results, application errors and Azure Function logs for the first 24 hours after deployment.`                                                                                                      |
+| **Post-release monitoring**                    | Always fill. Specify **who** will monitor, **what** they check (reports, Azure logs, tables such as `t_route_allocated` or `t_scheduler`), and **when** (for example 10 pm post release, every 5 min, or early morning post MAF activation). One line, or a numbered list per function, as in the worked examples. Do not use `N/A`. |
 
 ### Reviewer fields
 
@@ -40,7 +100,7 @@ The form also contains review metadata:
 | **Review Comments** | Populate only when an actual reviewer comment exists. Do not generate a fake approval comment such as `Looks good to me`.                                          |
 | **Review Date**     | Use the actual date the review occurred. Do not infer it from the release date.                                                                                    |
 | **Reviewer**        | Preserve the reviewer role defined by the template, e.g. `Dev Lead (Atakan)`, `Functional Lead (Henry)`, `Release Lead (Pranab)`.                                  |
-| **Reviewer Name**   | Populate with the actual reviewer name when known. Do not infer a name solely from the reviewer role.                                                              |
+| **Reviewer Name**   | Populate with the actual reviewer name when known; otherwise use the name in the reviewer role (e.g. `Atakan`) marked as a best guess.                              |
 
 ### Reviewer responsibilities from the example
 
@@ -57,16 +117,16 @@ The agent should preserve the intended ownership of reviews:
 
 The agent should follow these rules when completing the form:
 
-1. **Use evidence over inference.** Jira, GitHub, QA, deployment tickets, Snyk and release information are the primary sources.
+1. **Use evidence first, then best guess.** Jira, GitHub, QA, deployment tickets, Snyk and release information are the primary sources; where they run out, give a best guess and mark it.
 2. **Never fabricate approvals.** Approval status, reviewer names, comments and review dates must come from actual review evidence.
 3. **Never fabricate links or ticket numbers.**
 4. **Use `N/A` when genuinely not applicable**, rather than leaving a required field with meaningless text.
 5. **Make risks actionable.** Explain *failure → impact*, rather than simply naming the affected component.
-6. **Make rollback actionable.** State what version/process should be restored.
-7. **Make monitoring actionable.** Always aim to capture **who + what + when**.
-8. **Keep summaries concise.** The release form should be understandable without requiring the reviewer to inspect the source tickets.
+6. **Make rollback actionable, and always fill it.** Use `code update/rollback` (name the previous version) or `turn off using MAF params`. Never `N/A`.
+7. **Make monitoring actionable, and always fill it.** Capture **who + what + when**, as one line or a numbered per-function list. Never `N/A`.
+8. **Always fill the release summary, and keep it concise.** The release form should be understandable without requiring the reviewer to inspect the source tickets. Do not use `N/A` for the summary.
 9. **Distinguish technical changes from functional changes.**
-10. **Flag missing information** where human input is required rather than guessing.
+10. **Best-guess unclear fields and flag them** rather than leaving them blank — the human verifies flagged fields before submitting.
 11. **Preserve exact product/component/Jira/GitHub terminology** from the source material.
 12. **Do not introduce spreadsheet errors or malformed values** such as `#VALUE!`.
 13. **Always create new QA and Deployment tickets** for this release. Never reuse, copy, or attach an existing QA/Deploy ticket from a previous release or from Jira links on the development ticket.
@@ -113,14 +173,14 @@ This structure should work well as the **system/context prompt for the release-f
 
 ## Engineering notes (how this file is used)
 
-This file is loaded verbatim (first ~6000 characters) by
-`generateReleaseContext` in `src/workflows/wfRelease/states/checklist.js` and
-injected into the system prompt used to populate a release draft's checklist
-fields in a single LLM call. Editing the rules/field descriptions above
-directly changes what the agent is instructed to do when building a draft —
-no code change is needed for wording/rule tweaks, only for adding a brand
-new field (which also needs a matching entry in `FIELD_KEYS`,
-`createReleaseContext`, and `formatDraft`).
+Everything above this heading is loaded by `generateReleaseContext` in
+`src/workflows/wfRelease/states/checklist.js`. Padding spaces in the field
+table are collapsed, then the text is injected into the system prompt used to
+populate a release draft's checklist fields in a single LLM call. Editing the
+rules, field descriptions, or worked examples above directly changes what the
+agent is instructed to do when building a draft — no code change is needed for
+wording/rule tweaks, only for adding a brand new field (which also needs a
+matching entry in `FIELD_KEYS`, `createReleaseContext`, and `formatDraft`).
 
 Mapping from the spec's field names to the internal field keys used by the
 release workflow (`ctx.release.*` / `ctx.fields.*`):
@@ -131,7 +191,7 @@ release workflow (`ctx.release.*` / `ctx.fields.*`):
 | Previous release #                       | `previous_version`           | GitHub tags                                  |
 | Developer                                | `developer`                  | PR author / Jira assignee                    |
 | Component                                | `component`                  | Derived from repository name                 |
-| Release Summary                          | `release_summary`            | LLM (this spec) from PR/Jira evidence        |
+| Release Summary                          | `release_summary`            | LLM (always filled) from PR/Jira evidence. Fallback uses the PR title or Jira summary |
 | Product Release - Feature Group          | `feature_group`               | LLM, defaults to `N/A`                       |
 | Release Submission Date                  | `submission_date`             | Set automatically to the draft-build date    |
 | Github link                              | `github_link`                 | PR/commit/branch/repo URL, derived directly  |
@@ -139,12 +199,12 @@ release workflow (`ctx.release.*` / `ctx.fields.*`):
 | QAlity test ref                          | `qa_ticket`                   | Always created as a new ticket during the release draft (never reuse an existing QA ticket) |
 | Jira Task for deployment to prod         | `deployment_ticket`           | Always created as a new ticket during the release draft (never reuse an existing Deploy ticket) |
 | Changes to software stack                | `software_stack_changes`      | LLM, defaults to `N/A`                       |
-| Snyk security issues                     | `snyk_security`               | No Snyk integration yet — always defaults to a "not verified, manual check required" notice unless a human edits it |
+| Snyk security issues                     | `snyk_security`               | LLM when the evidence names a package or subdep (worked examples). Otherwise the GitHub Snyk check status, or a not-verified notice |
 | Release risks                            | `risk`                        | LLM from PR/Jira/commit evidence             |
-| Release rollback / backout plan          | `rollback_plan`               | LLM, or "Redeploy `<previous_version>`" heuristic |
+| Release rollback / backout plan          | `rollback_plan`               | LLM (always filled). Fallback: `code update/rollback` to `previous_version` when known |
 | Potential to contact the customer directly | `customer_impact`           | LLM from PR/Jira evidence                    |
 | Release security                         | `security`                    | LLM from PR/Jira evidence                    |
-| Post-release monitoring                  | `monitoring_owner`            | LLM, defaults to the developer               |
+| Post-release monitoring                  | `monitoring_owner`            | LLM (always filled: who + what + when). Fallback names the developer |
 | Status / Review Comments / Review Date / Reviewer / Reviewer Name | *(not stored on `ctx.release`)* | Rendered as a fixed reviewer-role list (Any, Dev Lead, Functional Lead, Release Lead) with blank Status/Name/Comments/Date — the workflow has no reviewer-approval data source, so these are never auto-filled, per rule 2 below. |
 
 All fields above are shown to the user in the draft (`wf_release_draft` /
