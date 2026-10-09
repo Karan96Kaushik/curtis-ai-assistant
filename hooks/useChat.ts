@@ -30,13 +30,24 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
 }
 
+/** The new-chat route has no id yet. Real conversation ids are UUIDs. */
+const NEW_CHAT_KEY = '';
+
+function chatKey(conversationId: string | null): string {
+  return conversationId ?? NEW_CHAT_KEY;
+}
+
 export function useChat(conversationId: string | null, { onConversationCreated, modelRef }: UseChatOptions) {
   const { touch } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  // The conversation that owns the in-flight turn. ChatView stays mounted across
+  // /c/:id changes, so a bare boolean would show "working" on every chat.
+  const inflightRef = useRef<string | null>(null);
+  const [inflightId, setInflightId] = useState<string | null>(null);
+  const sending = inflightId !== null && inflightId === chatKey(conversationId);
 
   const currentId = useRef(conversationId);
   const justCreated = useRef<string | null>(null);
@@ -91,7 +102,13 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
   const send = useCallback(
     async (text: string): Promise<boolean> => {
       const message = text.trim();
-      if (!message || sending) return false;
+      if (!message) return false;
+      if (inflightRef.current !== null) {
+        if (inflightRef.current !== chatKey(conversationId)) {
+          toast.error('Curtis is still working in another chat.');
+        }
+        return false;
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -105,7 +122,8 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         local: true,
       };
       setMessages((rows) => [...rows, optimistic]);
-      setSending(true);
+      inflightRef.current = chatKey(conversationId);
+      setInflightId(inflightRef.current);
 
       let targetId = conversationId;
       try {
@@ -118,6 +136,8 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
             return false;
           }
           justCreated.current = targetId;
+          inflightRef.current = targetId;
+          setInflightId(targetId);
           touch(created);
           onConversationCreated(targetId);
         }
@@ -157,7 +177,8 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
           }
           return true;
         }
-        setMessages((rows) => rows.filter((m) => m.id !== optimistic.id));
+        const stillOnTurn = targetId ? currentId.current === targetId : currentId.current === null;
+        if (stillOnTurn) setMessages((rows) => rows.filter((m) => m.id !== optimistic.id));
         restoreComposerDraft(targetId, message);
         toast.error(err instanceof Error ? err.message : String(err));
         return false;
@@ -165,11 +186,12 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         if (abortRef.current === controller) {
           abortRef.current = null;
           turnRef.current = null;
-          setSending(false);
+          inflightRef.current = null;
+          setInflightId(null);
         }
       }
     },
-    [conversationId, sending, touch, onConversationCreated, modelRef]
+    [conversationId, touch, onConversationCreated, modelRef]
   );
 
   return { messages, pending, loading, sending, notFound, send, cancel };
