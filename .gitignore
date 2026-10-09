@@ -14,3 +14,5 @@ context/schedule.json
 context/releases/
 
 amplify.yml
+.tmp/*
+.tmp*
