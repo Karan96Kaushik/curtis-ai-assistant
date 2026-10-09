@@ -7,6 +7,12 @@ const { startTimer } = require('../util/timing');
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const PREFIX = 'openrouter:';
+/**
+ * OpenRouter reserves credits for the full max output. Omitting this uses the
+ * model default (often 65536), which the free tier rejects. Free models are $0;
+ * 2000 stays within the balance that error reports.
+ */
+const MAX_TOKENS = 2000;
 
 function apiKey() {
   return String(process.env.OPENROUTER_API_KEY || '').trim();
@@ -61,7 +67,7 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
   const apiModel = toApiModelId(model);
   if (!apiModel) throw new Error('OpenRouter requires a model id');
 
-  const body = { model: apiModel, messages, temperature };
+  const body = { model: apiModel, messages, temperature, max_tokens: MAX_TOKENS };
   if (responseFormat) body.response_format = responseFormat;
   if (tools?.length) {
     body.tools = tools;
