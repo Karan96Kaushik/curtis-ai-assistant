@@ -117,11 +117,15 @@ async function runUntilPause(ctx) {
 
   persist(ctx);
 
+  // A draft or the completed form is self-contained; status lines + planning logs are noise.
+  const selfContained = (last?.pause === 'draft' || last?.done) && last.message;
   return {
     ctx,
     result: last || {},
     messages,
-    text: [statusText(ctx), '', ...(messages.length ? messages : [])].filter(Boolean).join('\n\n'),
+    text: selfContained
+      ? last.message
+      : [statusText(ctx), '', ...(messages.length ? messages : [])].filter(Boolean).join('\n\n'),
   };
 }
 

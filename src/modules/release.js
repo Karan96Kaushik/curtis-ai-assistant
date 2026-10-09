@@ -100,6 +100,9 @@ function toToolResult(outcome) {
     pause,
     pendingArgs,
     ctx: outcome?.ctx,
+    // Drafts and the release form are long, deterministic text — synthesis only sees a
+    // short preview of tool output and would drop most fields.
+    verbatim: true,
   };
 }
 
@@ -132,8 +135,8 @@ async function maybeStage(outcome, discordCtx) {
     { domainLabel: 'GitHub/Jira (release workflow)' }
   );
   if (!staged?.envelope?.data?.staged) return staged;
-  // Keep the engine's text (step results, links, the next-step prompt) above the gate notice.
-  return { ...staged, text: `${base.text}\n\n${staged.text}` };
+  // The engine text already tells the user what is staged and how to confirm/skip/cancel.
+  return { ...staged, text: base.text, verbatim: true };
 }
 
 /**
