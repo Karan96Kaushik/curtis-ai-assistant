@@ -1,14 +1,5 @@
 const { createJiraClient, JiraError, browseUrl } = require('../integrations/jiraClient');
-
-/**
- * @param {unknown} raw comma string or array
- * @returns {string[]}
- */
-function parseList(raw) {
-  if (!raw) return [];
-  const items = Array.isArray(raw) ? raw : String(raw).split(',');
-  return items.map((s) => String(s).trim()).filter(Boolean);
-}
+const { parseList } = require('../util/parseList');
 
 /**
  * Pick a transition by name: exact transition name, then exact target status,
@@ -186,4 +177,3 @@ function formatResult(result) {
 module.exports = jiraUpdateTask;
 module.exports.formatResult = formatResult;
 module.exports.matchTransition = matchTransition;
-module.exports.parseList = parseList;

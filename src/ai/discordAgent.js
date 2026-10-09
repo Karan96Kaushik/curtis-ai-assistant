@@ -12,7 +12,8 @@ const { EvidenceLedger } = require('./evidenceLedger');
 const { packsForIntent } = require('./promptPacks');
 const { toolsForIntent, buildAllTools } = require('./toolRegistry');
 const { synthesize } = require('./synthesizer');
-const { executeTaskDetailed } = require('../discord/taskRunner');
+const workspaceContext = require('./workspaceContext');
+const identity = require('../integrations/identity');
 const { startTimer } = require('../util/timing');
 const { nowForPrompt } = require('../util/time');
 const { lastIssueKeyFromHistory, extractIssueKeys } = require('../util/jiraKeys');
@@ -21,8 +22,8 @@ const config = require('../config');
 
 const MAX_TOOL_ROUNDS = 8;
 
-/** Tools that create/update/delete Jira data — hard-gated when REQUIRE_CONFIRMATION is on. */
-const MUTATING_TOOLS = new Set(['jira_create', 'jira_update', 'jira_delete_comment']);
+/** Read-only tools that must still run one at a time (they touch per-session state). */
+const SERIAL_TOOLS = new Set(['confirm_pending', 'cancel_pending', 'clear_context', 'clear_chat', 'memory_append', 'memory_write']);
 
 const CONFIRM_RE =
   /^(y|yes|yeah|yep|yup|ok|okay|k|confirm|confirmed|go|go\s*ahead|do\s*it|proceed|approve|approved|lgtm|ship\s*it|sure|sounds\s*good|yes\s*please)([\s.!?]|$)/i;
@@ -127,12 +128,16 @@ function githubUrlGrounding(ghUrl) {
   ];
   if (ghUrl.kind === 'pull' && ghUrl.full_name && ghUrl.number) {
     lines.push(`Call github_get_pr now with repo="${ghUrl.full_name}" and number=${ghUrl.number}.`);
+  } else if (ghUrl.kind === 'issue' && ghUrl.full_name && ghUrl.number) {
+    lines.push(`Call github_get_issue now with repo="${ghUrl.full_name}" and number=${ghUrl.number}.`);
   } else if (ghUrl.kind === 'tags' && ghUrl.full_name) {
     lines.push(`Call github_list_tags now with repo="${ghUrl.full_name}".`);
+  } else if (ghUrl.kind === 'commit' && ghUrl.full_name) {
+    lines.push(`Call github_list_commits now with repo="${ghUrl.full_name}"${ghUrl.sha ? ` and branch="${ghUrl.sha}" max=1` : ''}.`);
   } else if ((ghUrl.kind === 'org' || ghUrl.kind === 'user') && ghUrl.owner) {
     lines.push(`Call github_list_repos now with org="${ghUrl.owner}".`);
   } else if (ghUrl.full_name) {
-    lines.push(`Call github_search_repos now with query="repo:${ghUrl.full_name}".`);
+    lines.push(`Call github_get_repo now with repo="${ghUrl.full_name}".`);
   }
   return lines.join(' ');
 }
@@ -181,6 +186,18 @@ function coerceArgs(name, args) {
   if (name === 'jira_list_comments' && out.max != null) {
     out.max = Number(out.max);
   }
+  if (name?.startsWith('jira_')) {
+    for (const key of ['issue', 'from', 'to', 'parent']) {
+      if (typeof out[key] === 'string') out[key] = out[key].trim().toUpperCase();
+    }
+    for (const key of ['labels', 'components', 'add_labels', 'remove_labels']) {
+      if (Array.isArray(out[key])) out[key] = out[key].join(',');
+    }
+    if ((name === 'jira_search' || name === 'jira_find_user') && out.max != null) out.max = Number(out.max);
+  }
+  if (name === 'jira_get_issue') {
+    out.include_github = coerceBoolean(out.include_github, true);
+  }
   if (name === 'jira_monthly_activity' || name === 'github_monthly_activity') {
     if (typeof out.month === 'string') {
       out.month = out.month.trim();
@@ -226,6 +243,11 @@ function coerceArgs(name, args) {
       out.repo = out.repo.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '');
     }
     if (typeof out.tag === 'string') out.tag = out.tag.replace(/^refs\/tags\//, '').trim();
+    if (Array.isArray(out.include)) out.include = out.include.join(',');
+    if (name === 'github_get_repo') out.include_readme = coerceBoolean(out.include_readme, false);
+    for (const key of ['labels', 'assignees']) {
+      if (Array.isArray(out[key])) out[key] = out[key].join(',');
+    }
   }
 
   return out;
@@ -264,7 +286,7 @@ function buildSystemPrompt(discordCtx, turn) {
 
     confirmationBlock = [
       'Confirmation: REQUIRED for gated writes (hard gate).',
-      '- Jira create/update/delete, GitHub create-tag, browser click/type, and WF release mutating steps only PROPOSE until confirm_pending succeeds.',
+      `- Gated writes only PROPOSE until confirm_pending succeeds: ${[...registry.getMutatingTools()].join(', ')}.`,
       '- teams_open, browser_open_tab, and browser_navigate execute immediately (focus existing when possible).',
       '- Never claim a gated write succeeded until confirm_pending returns success.',
       '- Never invent "Jira" wording for a Teams/browser/GitHub/release pending action.',
@@ -298,10 +320,11 @@ function buildSystemPrompt(discordCtx, turn) {
       : '- After create/update, ALWAYS include the browse URL from the tool result.',
     '- On create: default assign_me=true unless the user says not to assign.',
     '- Put Branch, GH link, Dev Env into the issue description (markdown) on create when provided.',
-    '- Resolve board/project names via Org memory (Platform 25 → P25). Uppercase project keys.',
+    '- Resolve board/project names via the workspace aliases and Org memory (Platform 25 → P25). Uppercase project keys.',
     '- When remembering domains, store a short lesson under Domains/workstreams plus key tickets.',
     '- Keep Discord replies concise (under ~1800 characters).',
     '',
+    ...(turn.workspace ? [turn.workspace, ''] : []),
     ...(behavior
       ? [
           'Behavior memory (this user approved it — follow it for tone, defaults, format, and standing requirements):',
@@ -337,59 +360,6 @@ function asToolPayload(text, envelope) {
       data: null,
     },
   };
-}
-
-async function executeMutatingTool(name, args) {
-  if (name === 'jira_update') {
-    return executeTaskDetailed('jira-update', {
-      issue: args.issue,
-      status: args.status,
-      comment: args.comment,
-      description: args.description,
-    });
-  }
-  if (name === 'jira_create') {
-    return executeTaskDetailed('jira-create', {
-      project: args.project,
-      summary: args.summary,
-      type: args.type,
-      description: args.description,
-      assignToMe: args.assign_me,
-    });
-  }
-  if (name === 'jira_delete_comment') {
-    return executeTaskDetailed('jira-delete-comment', {
-      issue: args.issue,
-      commentId: args.comment_id,
-      deleteLast: args.delete_last,
-    });
-  }
-  throw new Error(`Not a mutating tool: ${name}`);
-}
-
-function stageMutatingTool(name, args, discordCtx) {
-  const summary = pendingActions.buildSummary(name, args);
-  pendingActions.set(discordCtx.channelId, discordCtx.userId, {
-    tool: name,
-    args,
-    summary,
-    turnId: discordCtx._turnId || null,
-  });
-  const text = [
-    'PENDING CONFIRMATION — nothing was changed in Jira yet (hard gate).',
-    summary,
-    '',
-    'Show this plan to the user and ask them to confirm or cancel in their next reply.',
-    'Do NOT call confirm_pending in this turn — wait for their next message.',
-    'When they confirm (yes/confirm), call confirm_pending. When they decline, call cancel_pending.',
-    'If they want edits, call this propose tool again with updated arguments.',
-  ].join('\n');
-  return asToolPayload(text, {
-    ok: true,
-    source: 'pending',
-    confidence: 'high',
-    data: { staged: true, tool: name, args },
-  });
 }
 
 async function runTool(name, rawArgs, discordCtx) {
@@ -471,6 +441,7 @@ function shouldSynthesize(intent, toolResults) {
   if (intent.domain === 'web' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
   if (intent.isWorkAgenda || intent.isIssueList || intent.isIssueDetail) return true;
   return toolResults.some((t) =>
+    (/^(jira|github)_/.test(t.name) && !registry.isMutatingTool(t.name)) ||
     ['web_search', 'web_fetch_page', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
   );
 }
@@ -482,7 +453,14 @@ function shouldSynthesize(intent, toolResults) {
  */
 async function handleUserMessage({ text, discord }) {
   if (!isConfigured()) {
-    throw new Error(providerLabel() === 'AI Studio' ? 'GOOGLE_AI_STUDIO_API_KEY is not set' : 'GROQ_API_KEY is not set');
+    const provider = providerLabel();
+    const missingKey =
+      provider === 'AI Studio'
+        ? 'GOOGLE_AI_STUDIO_API_KEY is not set'
+        : provider === 'OpenRouter'
+          ? 'OPENROUTER_API_KEY is not set'
+          : 'GROQ_API_KEY is not set';
+    throw new Error(missingKey);
   }
 
   const total = startTimer('agent.handleUserMessage');
@@ -553,6 +531,8 @@ async function handleUserMessage({ text, discord }) {
     const historyForIntent = conversationStore.getHistory(channelId, userId);
     const lastIssueKey =
       extractIssueKeys(text)[0] || lastIssueKeyFromHistory(historyForIntent.slice(0, -1));
+    const { lastGithubRefFromHistory } = require('../modules/github');
+    const lastGithubRef = lastGithubRefFromHistory(historyForIntent.slice(0, -1));
     const { extractWorkflowId } = require('../modules/release');
     const lastWorkflowId =
       extractWorkflowId(text) ||
@@ -566,6 +546,7 @@ async function handleUserMessage({ text, discord }) {
       pendingTool: pending?.tool || null,
       pendingArgs: pending?.args || null,
       lastIssueKey,
+      lastGithubRef,
       lastWorkflowId,
     });
 
@@ -576,9 +557,14 @@ async function handleUserMessage({ text, discord }) {
     const confirmOn = requireConfirmation();
     const tools = toolsForIntent(intent, { confirmOn, hasPending });
 
+    // Identity lookups are cached per process; only block on them for turns that use them.
+    const warming = identity.warm();
+    if (tools.some((t) => /^(jira|github)_/.test(t.function.name))) await warming;
+    const workspace = workspaceContext.forPrompt({ lastIssueKey, lastGithubRef });
+
     const history = historyForIntent;
     const messages = [
-      { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan }) },
+      { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan, workspace }) },
       ...history,
     ];
 
@@ -648,7 +634,7 @@ async function handleUserMessage({ text, discord }) {
           tool_calls: toolCalls,
         });
 
-        for (const call of toolCalls) {
+        const prepared = toolCalls.map((call) => {
           const fnName = call.function?.name;
           let args = {};
           try {
@@ -659,39 +645,23 @@ async function handleUserMessage({ text, discord }) {
           }
           const normalized = coerceArgs(fnName, args);
           console.log(`[groq] tool ${fnName}`, normalized);
-
           // L3 policy: reject tools outside the active toolset
-          if (!tools.some((t) => t.function.name === fnName)) {
-            const blocked = `Error: tool ${fnName} is not allowed in this turn (mode=${intent.mode}, domain=${intent.domain}, budget=${intent.budget}).`;
-            toolResults.push({ name: fnName, result: blocked });
-            evidence.ingest(fnName, {
-              text: blocked,
-              envelope: {
-                ok: false,
-                source: 'policy',
-                confidence: 'high',
-                data: null,
-                error: 'tool_not_allowed',
-              },
-            });
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: blocked,
-            });
-            continue;
-          }
+          const allowed = tools.some((t) => t.function.name === fnName);
+          return { call, fnName, normalized, allowed };
+        });
 
-          let payload;
+        const execute = async ({ fnName, normalized, allowed }) => {
+          if (!allowed) {
+            return asToolPayload(
+              `Error: tool ${fnName} is not allowed in this turn (mode=${intent.mode}, domain=${intent.domain}, budget=${intent.budget}).`,
+              { ok: false, source: 'policy', confidence: 'high', data: null, error: 'tool_not_allowed' }
+            );
+          }
           try {
             const handler = registry.getToolHandler(fnName);
-            if (handler) {
-              payload = await handler(normalized, turnCtx);
-            } else {
-              payload = await runTool(fnName, normalized, turnCtx);
-            }
+            return handler ? await handler(normalized, turnCtx) : await runTool(fnName, normalized, turnCtx);
           } catch (err) {
-            payload = asToolPayload(`Error: ${err.message || err}`, {
+            return asToolPayload(`Error: ${err.message || err}`, {
               ok: false,
               source: fnName,
               confidence: 'none',
@@ -699,7 +669,21 @@ async function handleUserMessage({ text, discord }) {
               error: err.message || String(err),
             });
           }
+        };
 
+        // Independent reads run concurrently; any write or session-state tool forces serial order.
+        const parallel =
+          prepared.length > 1 &&
+          prepared.every((p) => !registry.isMutatingTool(p.fnName) && !SERIAL_TOOLS.has(p.fnName));
+        const payloads = [];
+        if (parallel) {
+          payloads.push(...(await Promise.all(prepared.map(execute))));
+        } else {
+          for (const p of prepared) payloads.push(await execute(p));
+        }
+
+        prepared.forEach(({ call, fnName }, i) => {
+          const payload = payloads[i];
           const resultText = String(payload.text);
           toolResults.push({ name: fnName, result: resultText });
           evidence.ingest(fnName, { text: resultText, envelope: payload.envelope });
@@ -709,7 +693,7 @@ async function handleUserMessage({ text, discord }) {
             tool_call_id: call.id,
             content: resultText.slice(0, 8000),
           });
-        }
+        });
         roundTimer.end(`tool_calls=${toolCalls.map((c) => c.function?.name).join(',')}`);
         if (verbatimReply) break;
         continue;
@@ -720,7 +704,7 @@ async function handleUserMessage({ text, discord }) {
       // Hard gate: listing/agenda questions must call jira_my_issues this turn
       if (
         intent.forceJiraMyIssues &&
-        !toolResults.some((t) => t.name === 'jira_my_issues' || t.name === 'jira_get_issue') &&
+        !toolResults.some((t) => ['jira_my_issues', 'jira_get_issue', 'jira_search'].includes(t.name)) &&
         round < MAX_TOOL_ROUNDS - 1
       ) {
         console.warn('[grounding] list/agenda request without jira_my_issues — forcing tool call');
@@ -736,6 +720,25 @@ async function handleUserMessage({ text, discord }) {
               ].join(' '),
         });
         roundTimer.end('force_jira_my_issues');
+        continue;
+      }
+
+      // Hard gate: team/sprint/project lists must call jira_search
+      if (
+        intent.forceJiraSearch &&
+        !toolResults.some((t) => t.name === 'jira_search') &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        console.warn('[grounding] jira search request without jira_search — forcing tool call');
+        messages.push({ role: 'assistant', content: draft || '(draft)' });
+        messages.push({
+          role: 'system',
+          content: [
+            'GROUNDING: This question is not limited to the user\'s own assignments. Call jira_search now with JQL.',
+            intent.projects?.length ? `Project key(s): ${intent.projects.join(', ')}.` : '',
+          ].join(' '),
+        });
+        roundTimer.end('force_jira_search');
         continue;
       }
 

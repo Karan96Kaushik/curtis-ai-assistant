@@ -25,6 +25,7 @@
     "amplify:sandbox": "npx ampx sandbox",
     "amplify:secret:groq": "npx ampx sandbox secret set GROQ_API_KEY",
     "amplify:secret:google": "npx ampx sandbox secret set GOOGLE_AI_STUDIO_API_KEY",
+    "amplify:secret:openrouter": "npx ampx sandbox secret set OPENROUTER_API_KEY",
     "amplify:secret:jira": "npx ampx sandbox secret set JIRA_API_TOKEN",
     "amplify:secret:github": "npx ampx sandbox secret set GITHUB_TOKEN",
     "amplify:secret:serp": "npx ampx sandbox secret set SERP_API_KEY",

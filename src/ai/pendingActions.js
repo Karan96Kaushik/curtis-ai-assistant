@@ -66,6 +66,10 @@ function summarizeCreate(args) {
     `- Summary: ${args.summary}`,
     `- Assign to you: ${args.assign_me !== false ? 'yes' : 'no'}`,
   ];
+  if (args.parent) lines.push(`- Parent: ${args.parent}`);
+  if (args.priority) lines.push(`- Priority: ${args.priority}`);
+  if (args.labels) lines.push(`- Labels: ${[].concat(args.labels).join(', ')}`);
+  if (args.components) lines.push(`- Components: ${[].concat(args.components).join(', ')}`);
   if (args.description) {
     const preview = String(args.description).slice(0, 400);
     lines.push(`- Description:\n${preview}${args.description.length > 400 ? '…' : ''}`);
@@ -76,6 +80,11 @@ function summarizeCreate(args) {
 function summarizeUpdate(args) {
   const lines = [`Update ${args.issue}`];
   if (args.status) lines.push(`- Status → ${args.status}`);
+  if (args.summary) lines.push(`- Summary → ${args.summary}`);
+  if (args.assignee) lines.push(`- Assignee → ${args.assignee}`);
+  if (args.priority) lines.push(`- Priority → ${args.priority}`);
+  if (args.add_labels) lines.push(`- Add labels: ${[].concat(args.add_labels).join(', ')}`);
+  if (args.remove_labels) lines.push(`- Remove labels: ${[].concat(args.remove_labels).join(', ')}`);
   if (args.description !== undefined) {
     const preview = String(args.description).slice(0, 400);
     lines.push(
@@ -97,6 +106,29 @@ function buildSummary(tool, args) {
   if (tool === 'jira_create') return summarizeCreate(args);
   if (tool === 'jira_update') return summarizeUpdate(args);
   if (tool === 'jira_delete_comment') return summarizeDeleteComment(args);
+  if (tool === 'jira_link_issues') {
+    return `Link Jira issues\n- ${args.from} ${String(args.type || 'Relates')} → ${args.to}`;
+  }
+  if (tool === 'jira_log_work') {
+    const lines = ['Log work in Jira', `- Issue: ${args.issue}`, `- Time: ${args.time_spent}`];
+    if (args.started) lines.push(`- Started: ${args.started}`);
+    if (args.comment) lines.push(`- Note: ${String(args.comment).slice(0, 200)}`);
+    return lines.join('\n');
+  }
+  if (tool === 'github_add_comment') {
+    return [
+      'Comment on GitHub',
+      `- Target: ${args.repo || '?'}#${args.number ?? '?'}`,
+      `- Comment: ${String(args.body || '').slice(0, 400)}`,
+    ].join('\n');
+  }
+  if (tool === 'github_create_issue') {
+    const lines = ['Create GitHub issue', `- Repo: ${args.repo || '?'}`, `- Title: ${args.title}`];
+    if (args.labels) lines.push(`- Labels: ${[].concat(args.labels).join(', ')}`);
+    if (args.assignees) lines.push(`- Assignees: ${[].concat(args.assignees).join(', ')}`);
+    if (args.body) lines.push(`- Body:\n${String(args.body).slice(0, 400)}`);
+    return lines.join('\n');
+  }
   if (tool === 'browser_open_tab') return `Open browser tab\n- URL: ${args.url}`;
   if (tool === 'browser_navigate') return `Navigate browser tab\n- URL: ${args.url}${args.tab_id != null ? `\n- Tab: ${args.tab_id}` : ''}`;
   if (tool === 'browser_click') return `Click in browser\n- Selector: ${args.selector}`;

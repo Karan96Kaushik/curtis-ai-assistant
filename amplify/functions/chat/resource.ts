@@ -44,6 +44,7 @@ export const chat = defineFunction({
     WF_RELEASE_DIR: `${STATE_DIR}/releases`,
     GROQ_API_KEY: secret('GROQ_API_KEY'),
     GOOGLE_AI_STUDIO_API_KEY: secret('GOOGLE_AI_STUDIO_API_KEY'),
+    OPENROUTER_API_KEY: secret('OPENROUTER_API_KEY'),
     JIRA_API_TOKEN: secret('JIRA_API_TOKEN'),
     GITHUB_TOKEN: secret('GITHUB_TOKEN'),
     SERP_API_KEY: secret('SERP_API_KEY'),

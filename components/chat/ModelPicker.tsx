@@ -30,13 +30,13 @@ export default function ModelPicker({
           disabled={disabled}
           aria-label="Model"
           title={agentModelLabel(model)}
-          className="max-w-[16rem] text-muted-foreground"
+          className="max-w-[22rem] text-muted-foreground"
         >
           <span className="truncate">{agentModelLabel(model)}</span>
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="w-72">
+      <DropdownMenuContent align="end" side="top" className="w-80">
         <DropdownMenuLabel>Model</DropdownMenuLabel>
         {models.map((option) => (
           <DropdownMenuItem key={option.id} onSelect={() => onChange(option.id)}>

@@ -202,6 +202,32 @@ function parseRepo(ownerOrFull, repo) {
   return { owner: m[1], repo: m[2] };
 }
 
+/**
+ * Resolve { owner, repo } from tool args: repo as owner/repo or URL, owner + bare
+ * repo, or — when nothing is given and exactly one default repo is configured — that.
+ * @param {{ repo?: string, owner?: string, repository?: string, url?: string }} payload
+ * @returns {{ owner: string, repo: string, full_name: string, urlHint: ReturnType<typeof parseGithubUrl> }}
+ */
+function repoFromPayload(payload = {}) {
+  const urlHint = parseGithubUrl(payload.url || payload.repo || payload.repository || '');
+  let parsed;
+  if (payload.owner && payload.repo && !String(payload.repo).includes('/')) {
+    parsed = { owner: String(payload.owner).trim(), repo: String(payload.repo).trim() };
+  } else {
+    const full = payload.repo || payload.repository || payload.url || urlHint?.full_name;
+    if (full) {
+      parsed = parseRepo(full);
+    } else {
+      const defaults = require('../config').GITHUB_DEFAULT_REPOS || [];
+      if (defaults.length !== 1) {
+        throw new Error('Missing repo (expected owner/repo or a github.com URL)');
+      }
+      parsed = parseRepo(defaults[0]);
+    }
+  }
+  return { ...parsed, full_name: `${parsed.owner}/${parsed.repo}`, urlHint };
+}
+
 function isGithubConfigured() {
   return Boolean(process.env.GITHUB_TOKEN);
 }
@@ -474,12 +500,13 @@ function buildGithubClient({ token, baseUrl }) {
      * Unlike the search API this sees every branch, not just the default one.
      * @param {{ owner: string, repo: string, sha?: string, since?: string, until?: string, author?: string, per_page?: number, page?: number }} opts
      */
-    async listCommits({ owner, repo, sha, since, until, author, per_page = 100, page = 1 } = {}) {
+    async listCommits({ owner, repo, sha, since, until, author, path, per_page = 100, page = 1 } = {}) {
       const params = new URLSearchParams({
         per_page: String(Math.min(Math.max(Number(per_page) || 100, 1), 100)),
         page: String(Math.max(Number(page) || 1, 1)),
       });
       if (sha) params.set('sha', sha);
+      if (path) params.set('path', path);
       if (since) params.set('since', since);
       if (until) params.set('until', until);
       if (author) params.set('author', author);
@@ -723,6 +750,7 @@ function buildGithubClient({ token, baseUrl }) {
 module.exports = {
   createGithubClient,
   isGithubConfigured,
+  repoFromPayload,
   GithubError,
   parseRepo,
   parseGithubUrl,

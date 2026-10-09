@@ -9,17 +9,19 @@ const SUCCESS_CLAIM_RE =
 const WEB_SEARCH_CLAIM_RE =
   /\b(i\s+(searched|looked up)|according to (my |the )?search|search results? (show|say)|from the web|online sources?)\b/i;
 
+const registry = require('../core/moduleRegistry');
+
+/** Result text that marks an integration write (Jira/GitHub/release) as done. */
+const WRITE_SUCCESS_RE = /Created |Updated |Deleted |Linked |Logged |Commented on /i;
+
+/** Non-integration writes; module write tools come from registry.getMutatingTools(). */
 const WRITE_TOOLS = new Set([
-  'jira_create',
-  'jira_update',
-  'jira_delete_comment',
   'confirm_pending',
   'memory_append',
   'memory_write',
   'clear_context',
   'clear_chat',
   'cancel_pending',
-  'wf_release_execute_pending',
 ]);
 
 /**
@@ -75,14 +77,12 @@ function compactToolNote(toolResults) {
 
 function hasSuccessfulWrite(toolResults) {
   return toolResults.some(({ name, result }) => {
-    if (!WRITE_TOOLS.has(name)) return false;
+    const moduleWrite = registry.isMutatingTool(name);
+    if (!moduleWrite && !WRITE_TOOLS.has(name)) return false;
     const r = String(result || '');
     if (/^Error:|^BLOCKED:|PENDING CONFIRMATION/i.test(r)) return false;
-    if (['jira_create', 'jira_update', 'jira_delete_comment'].includes(name)) {
-      return /Created |Updated |Deleted /i.test(r);
-    }
-    if (name === 'confirm_pending') {
-      return /Created |Updated |Deleted /i.test(r);
+    if (moduleWrite || name === 'confirm_pending') {
+      return WRITE_SUCCESS_RE.test(r);
     }
     if (name === 'memory_append' || name === 'memory_write') {
       return /Appended to org memory|Wrote org memory|ok/i.test(r) && !/^Error:/i.test(r);

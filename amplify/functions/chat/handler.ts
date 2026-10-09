@@ -23,7 +23,7 @@ interface ChatRequest {
   action?: 'send' | 'propose-behavior';
   conversationId?: string | null;
   message?: string;
-  /** Allow-listed Groq or Google AI Studio model id. Omitted requests use the server default. */
+  /** Allow-listed Groq, Google AI Studio, or OpenRouter model id. Omitted requests use the server default. */
   model?: string;
   /** Client id for this turn, so Stop can mark it cancelled. */
   turnId?: string;

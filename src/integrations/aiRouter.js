@@ -1,26 +1,33 @@
 /**
- * Picks Groq or Google AI Studio for a chat completion.
- * The selected model id decides the router; both can be used in the same app.
+ * Picks Groq, Google AI Studio, or OpenRouter for a chat completion.
+ * The selected model id decides the router; all three can be used in the same app.
  */
 
 const groq = require('./groqClient');
 const google = require('./googleAiClient');
+const openrouter = require('./openRouterClient');
 
 function isGoogleModel(modelId) {
   return String(modelId || '').startsWith('gemini-');
 }
 
 function providerLabel(modelId) {
-  return isGoogleModel(modelId || groq.activeModel()) ? 'AI Studio' : 'Groq';
+  const id = modelId || groq.activeModel();
+  if (isGoogleModel(id)) return 'AI Studio';
+  if (openrouter.isOpenRouterModel(id)) return 'OpenRouter';
+  return 'Groq';
 }
 
 function isConfigured() {
-  if (isGoogleModel(groq.activeModel())) return google.isConfigured();
+  const id = groq.activeModel();
+  if (isGoogleModel(id)) return google.isConfigured();
+  if (openrouter.isOpenRouterModel(id)) return openrouter.isConfigured();
   return groq.isConfigured();
 }
 
 /**
- * Same options as groqClient.chat. A Gemini id goes to Google AI Studio.
+ * Same options as groqClient.chat.
+ * A Gemini id goes to Google AI Studio. An openrouter: id goes to OpenRouter.
  * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, model?: string, temperature?: number, responseFormat?: object, signal?: AbortSignal }} [opts]
  */
 async function chat(opts = {}) {
@@ -29,6 +36,7 @@ async function chat(opts = {}) {
   const signal = opts.signal || turn?.signal;
   const next = { ...opts, model, signal };
   if (isGoogleModel(model)) return google.chat(next);
+  if (openrouter.isOpenRouterModel(model)) return openrouter.chat(next);
   return groq.chat(next);
 }
 

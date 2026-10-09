@@ -1,5 +1,5 @@
 /** Which API serves this model. Shown in brackets next to the name. */
-export type AgentRouter = 'Groq' | 'AI Studio';
+export type AgentRouter = 'Groq' | 'AI Studio' | 'OpenRouter';
 
 export interface AgentModel {
   id: string;
@@ -15,6 +15,9 @@ export const AGENT_MODELS: readonly AgentModel[] = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', detail: 'Most capable', router: 'AI Studio' },
   { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', detail: 'Best for agents', router: 'AI Studio' },
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', detail: 'Fastest', router: 'AI Studio' },
+  { id: 'openrouter:anthropic/claude-opus-5.5', label: 'Claude Opus 5.5', detail: 'Most capable', router: 'OpenRouter' },
+  { id: 'openrouter:deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', detail: 'Most popular', router: 'OpenRouter' },
+  { id: 'openrouter:openai/gpt-6-luna', label: 'GPT-6 Luna', detail: 'Fastest', router: 'OpenRouter' },
 ] as const;
 
 export const DEFAULT_AGENT_MODEL = AGENT_MODELS[0].id;

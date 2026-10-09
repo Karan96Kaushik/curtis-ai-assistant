@@ -1,5 +1,5 @@
 const { createJiraClient, JiraError, browseUrl } = require('../integrations/jiraClient');
-const { parseList } = require('./jiraUpdate');
+const { parseList } = require('../util/parseList');
 
 /**
  * Create a Jira issue.

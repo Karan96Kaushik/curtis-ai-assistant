@@ -17,6 +17,7 @@ const {
   looksLikeIssueDetailFollowUp,
 } = require('../util/jiraKeys');
 const { looksLikeMonthlyActivity } = require('../util/monthRange');
+const { parseGithubUrl } = require('../integrations/githubClient');
 
 const READ_TOOLS = [
   'jira_my_issues',
@@ -33,7 +34,7 @@ const READ_TOOLS = [
 const WRITE_TOOLS = ['jira_create', 'jira_update', 'jira_delete_comment', 'jira_link_issues', 'jira_log_work'];
 
 const MUTATE_VERB_RE =
-  /\b(create|update|transition|comment on|add comment|delete comment|move .+ to|set description|assign|reassign|unassign|link|log (work|time|\d)|add label|remove label|set priority|change priority|rename)\b/i;
+  /\b(create|update|transition|comment on|add comment|delete comment|move .+ to|set description|assign|reassign|unassign|link\s+([A-Z][A-Z0-9]+-\d+|it|this|that|these|them|the\s+(issues?|tickets?))|log\s+(work|time|\d+(\.\d+)?\s*[wdhm])|add label|remove label|set priority|change priority|rename)\b/i;
 
 /** Jira writes, keyed by tool name. */
 const WRITE_EXECUTORS = {
@@ -103,11 +104,42 @@ function aliasedProjects(text) {
 function looksLikeJiraSearch(text) {
   const t = String(text || '');
   if (/\bjql\b/i.test(t)) return true;
-  if (aliasedProjects(t).length) return true;
-  if (/\b(in|for|on|from)\s+(project\s+)?[A-Z][A-Z0-9]{1,9}\b(?!-\d)/.test(t)) return true;
-  return /\b(sprint|unassigned|reported by|created by|raised by|filed by|assigned to (?!me\b)[a-z]+|everyone|the team|team'?s|whole team|blocked|blockers?|epic [A-Z][A-Z0-9]+-\d+|children of|under [A-Z][A-Z0-9]+-\d+|fix ?version|release [\w.-]+)\b/i.test(
+  if (aliasedProjects(t).length || mentionsProjectKey(t)) return true;
+  if (looksLikeChildSearch(t)) return true;
+  return /\b(sprint|unassigned|reported by|created by|raised by|filed by|assigned to (?!me\b)[a-z]+|everyone|the team|team'?s|whole team|blockers|fix ?version)\b/i.test(
     t
   );
+}
+
+/** "project ABC", "in P25", or a configured alias key as a whole word (not an issue key). */
+function mentionsProjectKey(text) {
+  const t = String(text || '');
+  if (/\bproject\s+[A-Z][A-Z0-9]{1,9}\b(?!-\d)/.test(t)) return true;
+  if (/\b(in|for|on|from)\s+[A-Z][A-Z0-9]*\d[A-Z0-9]*\b(?!-\d)/.test(t)) return true;
+  return Object.values(config.JIRA_PROJECT_ALIASES || {}).some((key) =>
+    new RegExp(`\\b${key}\\b(?!-\\d)`).test(t)
+  );
+}
+
+/** GitHub-flavoured asks ("issues in owner/repo", "comment on PR #3") with nothing Jira-specific. */
+function looksGithubOnly(text) {
+  const t = String(text || '');
+  const githubish =
+    Boolean(parseGithubUrl(t)) ||
+    /\b(github|gh|pull requests?|PRs?)\b/i.test(t) ||
+    /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+\b/.test(t) ||
+    /\b(in|on|for)\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/.test(t);
+  if (!githubish) return false;
+  return (
+    !/\b(jira|tickets?|board|sprint|epics?|stor(y|ies))\b/i.test(t) &&
+    !mentionsProjectKey(t) &&
+    !aliasedProjects(t).length
+  );
+}
+
+/** "children of P25-100", "under P25-100", "epic P25-100" — a key used as a scope, not a lookup. */
+function looksLikeChildSearch(text) {
+  return /\b(children of|subtasks? (of|under)|under|in epic|epic)\s+[A-Z][A-Z0-9]+-\d+\b/i.test(String(text || ''));
 }
 
 registry.register({
@@ -146,6 +178,7 @@ registry.register({
     }
 
     const keysInText = extractIssueKeys(t);
+    if (!keysInText.length && looksGithubOnly(t)) return null;
     const followUpKey = ctx.lastIssueKey || null;
     const wantsDetails =
       keysInText.length > 0 ||
@@ -155,7 +188,7 @@ registry.register({
     const mutate = MUTATE_VERB_RE.test(t) && /\b(ticket|issue|jira|[A-Z][A-Z0-9]+-\d+)\b/i.test(t);
 
     // Exact-key lookup beats list/agenda (stops fuzzy jira_my_issues on P25-3488)
-    if (wantsDetails && (keysInText[0] || followUpKey) && !mutate && !looksLikeJiraSearch(t)) {
+    if (wantsDetails && (keysInText[0] || followUpKey) && !mutate && !looksLikeChildSearch(t)) {
       const issueKey = keysInText[0] || followUpKey;
       return {
         domain: 'jira',
@@ -704,7 +737,7 @@ registry.register({
         }
       }
     }
-    if (/^(Created|Updated|Deleted|Cancelled|Linked|Logged) /i.test(text)) {
+    if (/Created |Updated |Deleted |Cancelled |Linked |Logged /i.test(text)) {
       out.push({ type: 'side_effect', value: text.split('\n')[0].slice(0, 160) });
     }
   }
