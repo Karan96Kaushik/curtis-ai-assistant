@@ -1,8 +1,8 @@
 import {
   agentFileForSlug,
-  BEHAVIOR_SLUG,
   kindForSlug,
-  maxCharsForSlug,
+  MAX_BEHAVIOR_CHARS,
+  MAX_REFERENCE_CHARS,
   SLUG_RE,
   type ContextKind,
 } from '@/lib/contexts/slugs';
@@ -21,6 +21,7 @@ export interface ContextInput {
   slug: string;
   title: string;
   content: string;
+  kind?: ContextKind;
 }
 
 export function contextsTableMissing(err: unknown): boolean {
@@ -63,8 +64,9 @@ export async function upsertContext(input: ContextInput): Promise<void> {
   }
   const title = input.title.trim();
   if (!title || title.length > 120) throw new Error('Title must be 1–120 characters.');
+  const kind = input.kind ?? kindForSlug(slug);
   const content = redactSecrets(input.content);
-  const max = maxCharsForSlug(slug);
+  const max = kind === 'behavior' ? MAX_BEHAVIOR_CHARS : MAX_REFERENCE_CHARS;
   if (content.length > max) throw new Error(`This document is too long (max ${max.toLocaleString()} characters).`);
 
   const userId = await requireUserId();
@@ -72,7 +74,7 @@ export async function upsertContext(input: ContextInput): Promise<void> {
     user_id: userId,
     slug,
     title,
-    kind: kindForSlug(slug),
+    kind,
     content,
     updated_at: new Date().toISOString(),
   });
@@ -80,19 +82,23 @@ export async function upsertContext(input: ContextInput): Promise<void> {
 }
 
 export async function deleteContext(slug: string): Promise<void> {
+  const existing = await supabase.from('contexts').select('kind').eq('slug', slug).maybeSingle();
+  if (existing.error) throw existing.error;
+  const kind = existing.data?.kind;
   const { error } = await supabase.from('contexts').delete().eq('slug', slug);
   if (error) throw error;
+  if (kind === 'behavior') return;
   const filePath = agentFileForSlug(slug);
   if (!filePath) return;
   const { error: fileError } = await supabase.from('agent_files').delete().eq('path', filePath);
   if (fileError) throw fileError;
 }
 
-export async function saveBehavior(content: string): Promise<void> {
-  const text = redactSecrets(content).trim();
+export async function saveBehaviorContext(input: { slug: string; title: string; content: string }): Promise<void> {
+  const text = redactSecrets(input.content).trim();
   if (!text) {
-    await deleteContext(BEHAVIOR_SLUG);
+    await deleteContext(input.slug);
     return;
   }
-  await upsertContext({ slug: BEHAVIOR_SLUG, title: 'Behavior', content: text });
+  await upsertContext({ slug: input.slug, title: input.title, content: text, kind: 'behavior' });
 }

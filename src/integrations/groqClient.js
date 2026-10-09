@@ -49,14 +49,6 @@ function isRateLimited(err) {
   );
 }
 
-function uniqueModels(primary) {
-  const list = [primary || DEFAULT_MODEL];
-  if (FALLBACK_MODEL && !list.includes(FALLBACK_MODEL)) {
-    list.push(FALLBACK_MODEL);
-  }
-  return list;
-}
-
 function currentTurn() {
   return turnStore.getStore() || null;
 }
@@ -84,7 +76,7 @@ function isAbortError(err) {
 
 /**
  * Chat completion with optional tools.
- * On HTTP 429: rotate through remaining API keys, then retry with FALLBACK_MODEL.
+ * On HTTP 429: rotate through remaining API keys. Another model is chosen by the router.
  * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, model?: string, temperature?: number, responseFormat?: object, signal?: AbortSignal }} opts
  */
 async function chat({ messages, tools, toolChoice, model, temperature = 0.2, responseFormat, signal }) {
@@ -97,7 +89,7 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
     throw err;
   }
   const pool = getClients();
-  const models = uniqueModels(chosen);
+  const modelId = chosen;
 
   const bodyBase = {
     messages,
@@ -120,53 +112,42 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
   /** @type {Error | null} */
   let lastErr = null;
 
-  for (let mi = 0; mi < models.length; mi++) {
-    const modelId = models[mi];
-    if (mi > 0) {
-      console.warn(
-        `[groq] Switching to fallback model ${modelId} after rate limits on ${models[0]}`
+  for (let i = 0; i < pool.length; i++) {
+    const keyIndex = (rrIndex + i) % pool.length;
+    const client = pool[keyIndex];
+    const keyLabel = KEY_ENVS[keyIndex] || `key#${keyIndex}`;
+
+    try {
+      const result = await client.chat.completions.create(
+        {
+          ...bodyBase,
+          model: modelId,
+        },
+        abortSignal ? { signal: abortSignal } : undefined
       );
-    }
-
-    for (let i = 0; i < pool.length; i++) {
-      const keyIndex = (rrIndex + i) % pool.length;
-      const client = pool[keyIndex];
-      const keyLabel = KEY_ENVS[keyIndex] || `key#${keyIndex}`;
-
-      try {
-        const result = await client.chat.completions.create(
-          {
-            ...bodyBase,
-            model: modelId,
-          },
-          abortSignal ? { signal: abortSignal } : undefined
-        );
-        // Prefer the next key on subsequent calls (load-spread after success).
-        rrIndex = (keyIndex + 1) % pool.length;
-        timer.end(
-          `model=${modelId} key=${keyLabel} messages=${messages.length} msgChars≈${msgChars} tools=${tools?.length || 0}`
-        );
-        return result;
-      } catch (err) {
-        lastErr = err;
-        if (isAbortError(err) || abortSignal?.aborted) {
-          timer.end(`aborted model=${modelId}`);
-          throw err;
-        }
-        if (isRateLimited(err)) {
-          console.warn(
-            `[groq] 429 rate limit on ${keyLabel} model=${modelId}; trying next key/model`
-          );
-          continue;
-        }
-        timer.end(`FAILED model=${modelId} key=${keyLabel}`);
+      // Prefer the next key on subsequent calls (load-spread after success).
+      rrIndex = (keyIndex + 1) % pool.length;
+      timer.end(
+        `model=${modelId} key=${keyLabel} messages=${messages.length} msgChars≈${msgChars} tools=${tools?.length || 0}`
+      );
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (isAbortError(err) || abortSignal?.aborted) {
+        timer.end(`aborted model=${modelId}`);
         throw err;
       }
+      if (isRateLimited(err)) {
+        console.warn(`[groq] 429 rate limit on ${keyLabel} model=${modelId}; trying next key`);
+        continue;
+      }
+      timer.end(`FAILED model=${modelId} key=${keyLabel}`);
+      throw err;
     }
   }
 
-  timer.end('FAILED all keys/models rate-limited');
-  throw lastErr || new Error('Groq rate limited on all API keys and models');
+  timer.end('FAILED all keys rate-limited');
+  throw lastErr || new Error('Groq rate limited on all API keys');
 }
 
 function isConfigured() {

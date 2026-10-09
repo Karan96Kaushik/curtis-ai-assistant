@@ -77,8 +77,8 @@ create policy agent_files_owner on public.agent_files
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
--- Named documents (org memory, specs) plus one behavior document per user.
--- Behavior is applied on later chats only after the user approves it.
+-- Named documents (org memory, specs) plus behavior contexts. A user may have
+-- several behavior rows. Later chats follow them only after the user approves.
 create table public.contexts (
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   slug text not null check (slug ~ '^[a-z0-9][a-z0-9-]{0,63}$'),
@@ -88,10 +88,6 @@ create table public.contexts (
   updated_at timestamptz not null default now(),
   primary key (user_id, slug)
 );
-
-create unique index contexts_one_behavior_idx
-  on public.contexts (user_id)
-  where kind = 'behavior';
 
 alter table public.contexts enable row level security;
 

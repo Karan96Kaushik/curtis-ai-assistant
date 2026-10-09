@@ -6,6 +6,7 @@ import { BrandMark } from '@/components/layout/BrandMark';
 import { Button } from '@/components/ui/button';
 import type { DisplayMessage } from '@/hooks/useChat';
 import { formatResponseDuration } from '@/lib/chat/duration';
+import modelCatalog from '@/src/integrations/modelCatalog.js';
 import { cn } from '@/lib/utils';
 
 function CopyButton({ text }: { text: string }) {
@@ -27,12 +28,18 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function ModelSwitch({ notice }: { notice: string | null }) {
+  if (!notice) return null;
+  return <p className="mt-1 text-xs text-muted-foreground">{notice}</p>;
+}
+
 function Duration({ ms }: { ms: number | null }) {
   if (ms == null) return null;
   return <p className="mt-1 text-xs text-muted-foreground">Took {formatResponseDuration(ms)}</p>;
 }
 
 function MessageBubble({ message, durationMs }: { message: DisplayMessage; durationMs: number | null }) {
+  const { body, notice } = modelCatalog.splitModelSwitch(message.content);
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -74,12 +81,13 @@ function MessageBubble({ message, durationMs }: { message: DisplayMessage; durat
               a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
             }}
           >
-            {message.content}
+            {body}
           </Markdown>
         </div>
+        <ModelSwitch notice={notice} />
         <Duration ms={durationMs} />
         <div className="mt-1 opacity-0 transition-opacity group-hover/msg:opacity-100 max-md:opacity-100">
-          <CopyButton text={message.content} />
+          <CopyButton text={body} />
         </div>
       </div>
     </div>

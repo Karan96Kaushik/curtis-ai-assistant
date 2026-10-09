@@ -26,6 +26,9 @@ export function sendChatMessage(request: SendChatRequest, signal?: AbortSignal):
 }
 
 export interface BehaviorProposal {
+  action: 'create' | 'update';
+  slug: string;
+  title: string;
   summary: string;
   content: string;
   previous: string;

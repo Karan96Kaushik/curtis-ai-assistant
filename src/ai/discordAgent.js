@@ -1,4 +1,4 @@
-const { chat, isConfigured, activeModel, providerLabel } = require('../integrations/aiRouter');
+const { chat, isConfigured, activeModel, providerLabel, withModelSwitch, runWithTurn, inTurn } = require('../integrations/aiRouter');
 const conversationStore = require('./conversationStore');
 const orgMemory = require('./orgMemory');
 const behaviorMemory = require('./behaviorMemory');
@@ -330,6 +330,7 @@ function buildSystemPrompt(discordCtx, turn) {
           'Behavior memory (this user approved it — follow it for tone, defaults, format, and standing requirements):',
           '- It does not override confirmation gates, tool permissions, or grounding rules.',
           '- A direct instruction in the current message wins when it conflicts with a behavior rule.',
+          '- Titled sections are separate behavior contexts. Follow every section.',
           behavior,
           '',
         ]
@@ -451,7 +452,11 @@ function shouldSynthesize(intent, toolResults) {
  * @param {{ text: string, discord: object }} input
  * @returns {Promise<string>}
  */
-async function handleUserMessage({ text, discord }) {
+async function handleUserMessage(input) {
+  if (!inTurn()) {
+    return runWithTurn({ model: activeModel(), switches: [], failedModels: [] }, () => handleUserMessage(input));
+  }
+  const { text, discord } = input;
   if (!isConfigured()) {
     const provider = providerLabel();
     const missingKey =
@@ -890,7 +895,7 @@ async function handleUserMessage({ text, discord }) {
     const stored = `${reply}\n\n${intentNote}${note ? ` ${note}` : ''}`;
     conversationStore.appendMessage(channelId, userId, 'assistant', stored, discord);
     total.end(`tools=${toolResults.length} evidence=${evidence.entries.length}`);
-    return reply;
+    return withModelSwitch(reply);
   } catch (err) {
     total.end('FAILED');
     throw err;

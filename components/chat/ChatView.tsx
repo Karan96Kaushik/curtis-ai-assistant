@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import Composer from '@/components/chat/Composer';
 import EmptyState from '@/components/chat/EmptyState';
+import ExportChatButton from '@/components/chat/ExportChatButton';
 import MessageBubble from '@/components/chat/MessageBubble';
 import PendingActionBar from '@/components/chat/PendingActionBar';
 import RememberBehaviorButton from '@/components/chat/RememberBehaviorButton';
@@ -52,7 +53,8 @@ export default function ChatView() {
       {conversationId && (
         <div className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
           <h1 className="hidden min-w-0 flex-1 truncate text-sm font-medium md:block">{title ?? 'Chat'}</h1>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <ExportChatButton title={title ?? 'Chat'} messages={messages} disabled={loading || notFound || messages.length === 0} />
             <RememberBehaviorButton
               conversationId={conversationId}
               model={model}

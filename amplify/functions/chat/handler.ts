@@ -10,13 +10,25 @@ import {
   type StoredPendingAction,
 } from './agentRuntime.js';
 import aiRouter from '../../../src/integrations/aiRouter.js';
+import modelCatalog from '../../../src/integrations/modelCatalog.js';
 import { isAgentModel, resolveAgentModel } from '../../../lib/chat/models.js';
 import { isCancelError, watchCancellation } from './cancellation.js';
 import { applyContexts, backfillOrgMemory, loadContexts, persistableFiles, syncContextsFromTurn } from './contextSync.js';
 import { proposeBehavior } from './proposeBehavior.js';
 
+interface TurnCtx {
+  model: string;
+  signal: AbortSignal;
+  switches: { from: string; to: string }[];
+  failedModels?: string[];
+}
+
 const { runWithTurn } = aiRouter as unknown as {
-  runWithTurn<T>(ctx: { model?: string; signal?: AbortSignal }, fn: () => Promise<T>): Promise<T>;
+  runWithTurn<T>(ctx: TurnCtx, fn: () => Promise<T>): Promise<T>;
+};
+
+const catalog = modelCatalog as unknown as {
+  switchNotice(switches: { from: string; to: string }[] | undefined): string | null;
 };
 
 interface ChatRequest {
@@ -169,8 +181,9 @@ export const handler = withHttp('chat', async (event) => {
     const turnId = requestedTurnId(body);
     const controller = new AbortController();
     const stopWatch = watchCancellation(db, behaviorConversationId, turnId, controller);
+    const behaviorTurn: TurnCtx = { model, signal: controller.signal, switches: [] };
     try {
-      return await runWithTurn({ model, signal: controller.signal }, () => proposeBehavior(db, behaviorConversationId));
+      return await runWithTurn(behaviorTurn, () => proposeBehavior(db, behaviorConversationId));
     } catch (err) {
       if (isCancelError(err, controller.signal)) throw new HttpError(499, 'Cancelled');
       throw err;
@@ -218,8 +231,9 @@ export const handler = withHttp('chat', async (event) => {
   let reply: MessageRow | null;
   const controller = new AbortController();
   const stopWatch = watchCancellation(db, conversation.id, turnId, controller);
+  const turnCtx: TurnCtx = { model, signal: controller.signal, switches: [] };
   try {
-    const turn = await runWithTurn({ model, signal: controller.signal }, () =>
+    const turn = await runWithTurn(turnCtx, () =>
       runAgentTurn({
         conversationId: conversation.id,
         user: {
@@ -267,8 +281,10 @@ export const handler = withHttp('chat', async (event) => {
     if (err instanceof HttpError) throw err;
     console.error('[chat] agent turn failed:', err);
     const message = err instanceof Error ? err.message : String(err);
+    const notice = catalog.switchNotice(turnCtx.switches);
+    const detail = notice ? `${notice}\n\nError: ${message}` : `Error: ${message}`;
     updated = await updateConversation(db, conversation.id, {});
-    reply = await insertMessage(db, caller, conversation.id, 'error', `Error: ${message}`);
+    reply = await insertMessage(db, caller, conversation.id, 'error', detail);
   } finally {
     stopWatch();
   }

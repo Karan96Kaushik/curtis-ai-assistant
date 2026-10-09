@@ -4,6 +4,7 @@ const { Client, Events, GatewayIntentBits, Partials, ChannelType } = require('di
 const { executeTask } = require('../src/discord/taskRunner');
 const discordAgent = require('../src/ai/discordAgent');
 const { DEFAULT_MODEL } = require('../src/integrations/groqClient');
+const { displayModelSwitch } = require('../src/integrations/modelCatalog');
 const { startTimer } = require('../src/util/timing');
 const config = require('../src/config');
 const scheduler = require('../src/core/scheduler');
@@ -313,10 +314,12 @@ async function handleMessage(message) {
       cmdTimer.end();
     } else {
       console.log(`AI message from ${message.author.tag}: ${classified.text.slice(0, 80)}`);
-      content = await discordAgent.handleUserMessage({
-        text: classified.text,
-        discord: discordContextFromMessage(message),
-      });
+      content = displayModelSwitch(
+        await discordAgent.handleUserMessage({
+          text: classified.text,
+          discord: discordContextFromMessage(message),
+        })
+      );
     }
     await finishReply(message, thinking, content);
     total.end(`kind=${classified.kind}`);

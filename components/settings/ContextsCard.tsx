@@ -38,6 +38,7 @@ interface EditorState {
   slug: string;
   title: string;
   content: string;
+  kind: ContextRecord['kind'];
   slugTouched: boolean;
 }
 
@@ -65,19 +66,19 @@ export default function ContextsCard() {
   }, []);
 
   function openCreate() {
-    setEditor({ mode: 'create', slug: '', title: '', content: '', slugTouched: false });
+    setEditor({ mode: 'create', slug: '', title: '', content: '', kind: 'reference', slugTouched: false });
   }
 
   function openEdit(row: ContextRecord) {
-    setEditor({ mode: 'edit', slug: row.slug, title: row.title, content: row.content, slugTouched: true });
+    setEditor({ mode: 'edit', slug: row.slug, title: row.title, content: row.content, kind: row.kind, slugTouched: true });
   }
 
   async function save() {
     if (!editor) return;
     setSaving(true);
     try {
-      await upsertContext({ slug: editor.slug, title: editor.title, content: editor.content });
-      toast.success(editor.slug === BEHAVIOR_SLUG ? 'Behavior saved. Future chats will follow it.' : 'Context saved.');
+      await upsertContext({ slug: editor.slug, title: editor.title, content: editor.content, kind: editor.kind });
+      toast.success(editor.kind === 'behavior' ? 'Behavior saved. Future chats will follow it.' : 'Context saved.');
       setEditor(null);
       await reload();
     } catch (err) {
@@ -92,7 +93,7 @@ export default function ContextsCard() {
     setDeleting(true);
     try {
       await deleteContext(pendingDelete.slug);
-      toast.success(pendingDelete.slug === BEHAVIOR_SLUG ? 'Behavior cleared.' : 'Context deleted.');
+      toast.success(pendingDelete.kind === 'behavior' ? 'Behavior deleted.' : 'Context deleted.');
       setPendingDelete(null);
       await reload();
     } catch (err) {
@@ -104,7 +105,7 @@ export default function ContextsCard() {
 
   const slug = editor?.slug.trim() ?? '';
   const slugOk = SLUG_RE.test(slug);
-  const limit = slugOk ? maxCharsForSlug(slug) : MAX_BEHAVIOR_CHARS;
+  const limit = editor?.kind === 'behavior' || slug === BEHAVIOR_SLUG ? MAX_BEHAVIOR_CHARS : maxCharsForSlug(slugOk ? slug : ORG_MEMORY_SLUG);
   const canSave = !!editor && slugOk && editor.title.trim().length > 0 && editor.title.trim().length <= 120 && editor.content.length <= limit;
 
   return (
@@ -114,8 +115,8 @@ export default function ContextsCard() {
           <div>
             <CardTitle>Contexts</CardTitle>
             <CardDescription>
-              Documents Curtis can read, such as org memory and specs. Behavior is applied to later chats only after you
-              approve it.
+              Documents Curtis can read, such as org memory and specs. Each behavior context is applied to later chats
+              only after you approve it.
             </CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={openCreate} disabled={!!loadError}>
@@ -170,8 +171,8 @@ export default function ContextsCard() {
           <DialogHeader>
             <DialogTitle>{editor?.mode === 'edit' ? 'Edit context' : 'Add context'}</DialogTitle>
             <DialogDescription>
-              {slug === BEHAVIOR_SLUG
-                ? 'This document changes how Curtis responds in later chats.'
+              {editor?.kind === 'behavior' || slug === BEHAVIOR_SLUG
+                ? 'This behavior context changes how Curtis responds in later chats.'
                 : slug === ORG_MEMORY_SLUG
                   ? 'Org memory is included in every chat. Curtis can also append facts when you ask it to remember something.'
                   : 'Curtis can read this when a task needs it. A slug like timesheet-filing-spec keeps the name stable.'}
@@ -245,8 +246,8 @@ export default function ContextsCard() {
           <DialogHeader>
             <DialogTitle>Delete {pendingDelete?.title}?</DialogTitle>
             <DialogDescription>
-              {pendingDelete?.slug === BEHAVIOR_SLUG
-                ? 'Future chats will stop following this behavior.'
+              {pendingDelete?.kind === 'behavior'
+                ? 'Future chats will stop following this behavior context.'
                 : 'Curtis will no longer be able to read this document.'}
             </DialogDescription>
           </DialogHeader>

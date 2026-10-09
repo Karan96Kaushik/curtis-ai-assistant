@@ -10,10 +10,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { proposeBehaviorMemory } from '@/lib/amplify/chat-functions';
 import { MAX_BEHAVIOR_CHARS } from '@/lib/contexts/slugs';
-import { contextsTableMissing, errorText, saveBehavior } from '@/lib/supabase/contexts';
+import { contextsTableMissing, errorText, saveBehaviorContext } from '@/lib/supabase/contexts';
 import { requestCancel } from '@/lib/supabase/conversations';
 
 type Phase = 'loading' | 'review' | 'saving';
@@ -25,6 +27,9 @@ function explain(err: unknown): string {
   }
   if (contextsTableMissing(err) || /contexts table/i.test(message)) {
     return 'Run supabase/migrations/0002_contexts.sql in the Supabase SQL editor, then try again.';
+  }
+  if (/contexts_one_behavior|duplicate key/i.test(message)) {
+    return 'Run supabase/migrations/0004_multiple_behaviors.sql in the Supabase SQL editor, then try again.';
   }
   return message;
 }
@@ -41,6 +46,9 @@ export default function RememberBehaviorButton({
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('loading');
   const [summary, setSummary] = useState('');
+  const [action, setAction] = useState<'create' | 'update'>('create');
+  const [slug, setSlug] = useState('');
+  const [title, setTitle] = useState('');
   const [previous, setPrevious] = useState('');
   const [content, setContent] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -65,12 +73,18 @@ export default function RememberBehaviorButton({
     setPhase('loading');
     setError(null);
     setSummary('');
+    setAction('create');
+    setSlug('');
+    setTitle('');
     setContent('');
     setPrevious('');
     try {
       const proposal = await proposeBehaviorMemory(conversationId, { signal: controller.signal, model, turnId });
       if (controller.signal.aborted || requestId.current !== id) return;
       setSummary(proposal.summary);
+      setAction(proposal.action === 'update' ? 'update' : 'create');
+      setSlug(proposal.slug);
+      setTitle(proposal.title);
       setPrevious(proposal.previous ?? '');
       setContent(proposal.content ?? '');
       setPhase('review');
@@ -87,8 +101,14 @@ export default function RememberBehaviorButton({
     setPhase('saving');
     try {
       const clearing = !content.trim();
-      await saveBehavior(content);
-      toast.success(clearing ? 'Behavior cleared. Future chats will not use it.' : 'Behavior saved. Future chats will follow it.');
+      await saveBehaviorContext({ slug, title, content });
+      toast.success(
+        clearing
+          ? `Removed “${title}”. Future chats will not use it.`
+          : action === 'create'
+            ? `Saved “${title}”. Future chats will follow it.`
+            : `Updated “${title}”. Future chats will follow it.`
+      );
       setOpen(false);
     } catch (err) {
       toast.error(explain(err));
@@ -98,7 +118,8 @@ export default function RememberBehaviorButton({
 
   const unchanged = content.trim() === previous.trim();
   const clearing = !content.trim() && previous.trim().length > 0;
-  const canApprove = phase === 'review' && !error && !unchanged && content.length <= MAX_BEHAVIOR_CHARS;
+  const titleOk = title.trim().length > 0 && title.trim().length <= 120;
+  const canApprove = phase === 'review' && !error && !unchanged && titleOk && slug.length > 0 && content.length <= MAX_BEHAVIOR_CHARS;
 
   return (
     <>
@@ -125,8 +146,8 @@ export default function RememberBehaviorButton({
           <DialogHeader>
             <DialogTitle>Save behavior from this chat</DialogTitle>
             <DialogDescription>
-              Curtis reads this chat for preferences and standing requirements. Nothing is stored until you approve, and
-              later chats follow the approved text.
+              Curtis reads this chat and either folds the rule into an existing behavior title or starts a new one.
+              Nothing is stored until you approve.
             </DialogDescription>
           </DialogHeader>
 
@@ -140,6 +161,18 @@ export default function RememberBehaviorButton({
           ) : (
             <div className="grid gap-3">
               {summary && <p className="text-sm text-muted-foreground">{summary}</p>}
+              <p className="text-sm">
+                {action === 'create' ? 'New behavior context' : 'Folds into an existing behavior context'}
+              </p>
+              <div className="grid gap-2">
+                <Label htmlFor="behavior-title">Title</Label>
+                <Input
+                  id="behavior-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  disabled={phase === 'saving'}
+                />
+              </div>
               <Textarea
                 value={content}
                 onChange={(event) => setContent(event.target.value)}

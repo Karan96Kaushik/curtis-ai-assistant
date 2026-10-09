@@ -37,8 +37,27 @@ export function kindForSlug(slug: string): ContextKind {
   return slug === BEHAVIOR_SLUG ? 'behavior' : 'reference';
 }
 
+export function maxCharsForKind(kind: ContextKind): number {
+  return kind === 'behavior' ? MAX_BEHAVIOR_CHARS : MAX_REFERENCE_CHARS;
+}
+
 export function maxCharsForSlug(slug: string): number {
-  return slug === BEHAVIOR_SLUG ? MAX_BEHAVIOR_CHARS : MAX_REFERENCE_CHARS;
+  return maxCharsForKind(kindForSlug(slug));
+}
+
+/** Slug from a title that does not collide with a slug already in use. */
+export function uniqueSlug(title: string, taken: ReadonlySet<string>): string {
+  let base = slugifyTitle(title);
+  if (!SLUG_RE.test(base)) base = 'behavior';
+  if (base === ORG_MEMORY_SLUG) base = 'behavior-notes';
+  let slug = base;
+  let n = 2;
+  while (taken.has(slug)) {
+    const suffix = `-${n}`;
+    slug = `${base.slice(0, 64 - suffix.length)}${suffix}`;
+    n += 1;
+  }
+  return slug;
 }
 
 /** Agent-written files that should be copied into the contexts table. Behavior is excluded. */

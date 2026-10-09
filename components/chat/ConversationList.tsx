@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router';
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Download, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import DeleteConversationDialog from '@/components/chat/DeleteConversationDialog';
 import RenameConversationDialog from '@/components/chat/RenameConversationDialog';
@@ -14,6 +14,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConversations } from '@/hooks/useConversations';
 import { groupConversations } from '@/lib/chat/conversations';
+import { downloadChatExport, type ChatExportFormat } from '@/lib/chat/exportChat';
+import { listMessages } from '@/lib/supabase/messages';
 import type { ConversationSummary } from '@/lib/supabase/types';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +34,19 @@ export default function ConversationList() {
       setRenaming(null);
     } catch (err) {
       toast.error(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function handleExport(conversation: ConversationSummary, format: ChatExportFormat) {
+    try {
+      const messages = await listMessages(conversation.id);
+      if (!messages.length) {
+        toast.error('This chat has no messages to export.');
+        return;
+      }
+      downloadChatExport({ title: conversation.title, messages, format });
+    } catch (err) {
+      toast.error(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -96,6 +111,14 @@ export default function ConversationList() {
                       <DropdownMenuItem onSelect={() => setRenaming(c)}>
                         <Pencil />
                         Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void handleExport(c, 'markdown')}>
+                        <Download />
+                        Export Markdown
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void handleExport(c, 'json')}>
+                        <Download />
+                        Export JSON
                       </DropdownMenuItem>
                       <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(c)}>
                         <Trash2 />

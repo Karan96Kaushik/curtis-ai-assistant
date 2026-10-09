@@ -57,13 +57,16 @@ export function applyContexts(files: StateFile[], contexts: ContextRow[]): State
   const map = new Map(files.map((file) => [file.path, file.content]));
   const index: IndexEntry[] = [];
 
+  const behaviorSections = contexts
+    .filter((ctx) => SLUG_RE.test(ctx.slug) && ctx.kind === 'behavior' && ctx.content.trim())
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((ctx) => `# ${ctx.title || ctx.slug}\n\n${ctx.content.trim()}`);
+  if (behaviorSections.length) map.set(BEHAVIOR_FILE, `${behaviorSections.join('\n\n')}\n`);
+  else map.delete(BEHAVIOR_FILE);
+
   for (const ctx of contexts) {
     if (!SLUG_RE.test(ctx.slug)) continue;
-    if (ctx.kind === 'behavior' || ctx.slug === 'behavior') {
-      if (ctx.content.trim()) map.set(BEHAVIOR_FILE, ctx.content);
-      else map.delete(BEHAVIOR_FILE);
-      continue;
-    }
+    if (ctx.kind === 'behavior') continue;
     const filePath = ctx.slug === ORG_MEMORY_SLUG ? ORG_MEMORY_FILE : `contexts/${ctx.slug}.md`;
     map.set(filePath, ctx.content);
     index.push({ slug: ctx.slug, title: ctx.title || defaultContextTitle(ctx.slug), kind: 'reference' });

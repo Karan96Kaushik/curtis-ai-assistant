@@ -248,7 +248,7 @@ async function getFile(payload = {}) {
   if (Array.isArray(data)) {
     return envelope({
       full_name,
-      path: path || '/',
+      path,
       ref: ref || null,
       kind: 'dir',
       entries: data.map((e) => ({ name: e.name, type: e.type, size: e.size })),
@@ -272,7 +272,7 @@ async function getFile(payload = {}) {
 
 function formatGetFile(raw) {
   const d = raw.data;
-  const where = `${d.full_name}/${d.path}${d.ref ? `@${d.ref}` : ''}`;
+  const where = `${d.full_name}${d.path ? `/${d.path}` : ' (root)'}${d.ref ? `@${d.ref}` : ''}`;
   if (d.kind === 'dir') {
     return [`${where} (directory, ${d.entries.length} entries):`, ...d.entries.map((e) => `• ${e.type === 'dir' ? `${e.name}/` : e.name}`)].join('\n');
   }
