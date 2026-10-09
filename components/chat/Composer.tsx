@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
+import ModelPicker from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import type { AgentModel } from '@/lib/chat/models';
 
 const MAX_CHARS = 4000;
 
@@ -9,11 +11,19 @@ export default function Composer({
   sending,
   disabled,
   onSend,
+  onCancel,
+  model,
+  models,
+  onModelChange,
   autoFocusKey,
 }: {
   sending: boolean;
   disabled?: boolean;
   onSend(text: string): Promise<boolean>;
+  onCancel(): void;
+  model: string;
+  models: readonly AgentModel[];
+  onModelChange(id: string): void;
   /** Refocus when this changes (e.g. switching chats). */
   autoFocusKey?: string;
 }) {
@@ -36,6 +46,11 @@ export default function Composer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape' && sending) {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void submit();
@@ -59,17 +74,26 @@ export default function Composer({
         disabled={disabled}
         rows={1}
         aria-label="Message"
-        className="max-h-48 min-h-12 resize-none border-0 bg-transparent py-3.5 pr-14 pl-4 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        className="max-h-48 min-h-12 resize-none border-0 bg-transparent px-4 pt-3.5 pb-1 shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
-      <div className="absolute right-2 bottom-2 flex items-center gap-2">
-        {value.length > MAX_CHARS * 0.9 && (
-          <span className={value.length > MAX_CHARS ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-            {value.length}/{MAX_CHARS}
-          </span>
-        )}
-        <Button type="submit" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label="Send">
-          {sending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-        </Button>
+      <div className="flex items-center justify-end gap-2 px-2 pb-2">
+        <div className="flex items-center gap-2">
+          {value.length > MAX_CHARS * 0.9 && (
+            <span className={value.length > MAX_CHARS ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+              {value.length}/{MAX_CHARS}
+            </span>
+          )}
+          <ModelPicker model={model} models={models} disabled={disabled || sending} onChange={onModelChange} />
+          {sending ? (
+            <Button type="button" size="icon-sm" className="rounded-full" onClick={onCancel} aria-label="Stop" title="Stop generating">
+              <span className="size-2.5 rounded-[2px] bg-current" />
+            </Button>
+          ) : (
+            <Button type="submit" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label="Send">
+              <ArrowUp />
+            </Button>
+          )}
+        </div>
       </div>
     </form>
   );

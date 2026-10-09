@@ -1,0 +1,39 @@
+/** Which API serves this model. Shown in brackets next to the name. */
+export type AgentRouter = 'Groq' | 'AI Studio';
+
+export interface AgentModel {
+  id: string;
+  label: string;
+  detail: string;
+  router: AgentRouter;
+}
+
+export const AGENT_MODELS: readonly AgentModel[] = [
+  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', detail: 'Most capable', router: 'Groq' },
+  { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B', detail: 'Strong reasoning', router: 'Groq' },
+  { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', detail: 'Fastest', router: 'Groq' },
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', detail: 'Most capable', router: 'AI Studio' },
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', detail: 'Best for agents', router: 'AI Studio' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', detail: 'Fastest', router: 'AI Studio' },
+] as const;
+
+export const DEFAULT_AGENT_MODEL = AGENT_MODELS[0].id;
+
+const ALLOWED = new Set<string>(AGENT_MODELS.map((model) => model.id));
+
+export function isAgentModel(value: unknown): value is string {
+  return typeof value === 'string' && ALLOWED.has(value);
+}
+
+/** Use an allow-listed id, otherwise the env default when that is allow-listed, otherwise GPT-OSS 120B. */
+export function resolveAgentModel(value: unknown, fallback?: string): string {
+  if (isAgentModel(value)) return value;
+  if (isAgentModel(fallback)) return fallback;
+  return DEFAULT_AGENT_MODEL;
+}
+
+export function agentModelLabel(id: string): string {
+  const model = AGENT_MODELS.find((entry) => entry.id === id);
+  if (!model) return id;
+  return `${model.label} (${model.router})`;
+}

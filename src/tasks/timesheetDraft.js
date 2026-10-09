@@ -5,7 +5,7 @@
 
 const jiraMonthlyActivityTask = require('./jiraMonthlyActivity');
 const githubMonthlyActivityTask = require('./githubMonthlyActivity');
-const { chat } = require('../integrations/groqClient');
+const { chat } = require('../integrations/aiRouter');
 const { resolveMonth, MONTH_NAMES } = require('../util/monthRange');
 const { ukParts } = require('../util/time');
 

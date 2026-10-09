@@ -43,6 +43,7 @@ export const chat = defineFunction({
     BEHAVIOR_MEMORY_PATH: `${STATE_DIR}/behavior.md`,
     WF_RELEASE_DIR: `${STATE_DIR}/releases`,
     GROQ_API_KEY: secret('GROQ_API_KEY'),
+    GOOGLE_AI_STUDIO_API_KEY: secret('GOOGLE_AI_STUDIO_API_KEY'),
     JIRA_API_TOKEN: secret('JIRA_API_TOKEN'),
     GITHUB_TOKEN: secret('GITHUB_TOKEN'),
     SERP_API_KEY: secret('SERP_API_KEY'),

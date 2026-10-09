@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { useConversations } from '@/hooks/useConversations';
 import { sendChatMessage } from '@/lib/amplify/chat-functions';
 import type { PendingAction } from '@/lib/chat/pending';
 import { parsePendingAction } from '@/lib/chat/pending';
-import { getConversationPending } from '@/lib/supabase/conversations';
+import { createConversation, deleteConversation, getConversationPending, requestCancel } from '@/lib/supabase/conversations';
 import { listMessages } from '@/lib/supabase/messages';
 import type { ChatMessage } from '@/lib/supabase/types';
 
@@ -16,9 +16,20 @@ export interface DisplayMessage extends ChatMessage {
 interface UseChatOptions {
   /** Called when the first message of a new chat created a conversation. */
   onConversationCreated(id: string): void;
+  /** Current Groq model id. A ref so Send does not wait on a re-render. */
+  modelRef: RefObject<string>;
 }
 
-export function useChat(conversationId: string | null, { onConversationCreated }: UseChatOptions) {
+function titleFromMessage(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'New chat';
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
+export function useChat(conversationId: string | null, { onConversationCreated, modelRef }: UseChatOptions) {
   const { touch } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -28,6 +39,8 @@ export function useChat(conversationId: string | null, { onConversationCreated }
 
   const currentId = useRef(conversationId);
   const justCreated = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const turnRef = useRef<{ conversationId: string; turnId: string } | null>(null);
 
   useEffect(() => {
     currentId.current = conversationId;
@@ -65,15 +78,26 @@ export function useChat(conversationId: string | null, { onConversationCreated }
     };
   }, [conversationId]);
 
+  const cancel = useCallback(() => {
+    const turn = turnRef.current;
+    abortRef.current?.abort();
+    if (!turn) return;
+    void requestCancel(turn.conversationId, turn.turnId).catch(() => {
+      // Stop still ends the wait. The server keeps going until the cancel column exists.
+    });
+  }, []);
+
   const send = useCallback(
     async (text: string): Promise<boolean> => {
       const message = text.trim();
       if (!message || sending) return false;
 
-      const targetId = conversationId;
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const turnId = crypto.randomUUID();
       const optimistic: DisplayMessage = {
         id: `local-${Date.now()}`,
-        conversation_id: targetId ?? '',
+        conversation_id: conversationId ?? '',
         role: 'user',
         content: message,
         created_at: new Date().toISOString(),
@@ -82,30 +106,63 @@ export function useChat(conversationId: string | null, { onConversationCreated }
       setMessages((rows) => [...rows, optimistic]);
       setSending(true);
 
+      let targetId = conversationId;
       try {
-        const res = await sendChatMessage({ conversationId: targetId, message });
+        if (!targetId) {
+          const created = await createConversation(titleFromMessage(message));
+          targetId = created.id;
+          if (controller.signal.aborted) {
+            await deleteConversation(targetId).catch(() => {});
+            setMessages((rows) => rows.filter((m) => m.id !== optimistic.id));
+            return false;
+          }
+          justCreated.current = targetId;
+          touch(created);
+          onConversationCreated(targetId);
+        }
+
+        turnRef.current = { conversationId: targetId, turnId };
+        const res = await sendChatMessage(
+          { conversationId: targetId, message, model: modelRef.current, turnId },
+          controller.signal
+        );
+        if (controller.signal.aborted) return true;
         touch(res.conversation);
 
         const stillHere = currentId.current === targetId;
         if (!stillHere) return true;
 
-        setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage, res.reply]);
-        setPending(parsePendingAction(res.pending));
-        if (!targetId) {
-          justCreated.current = res.conversation.id;
-          onConversationCreated(res.conversation.id);
+        if (res.cancelled || !res.reply) {
+          setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage]);
+          return true;
         }
+
+        setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage, res.reply!]);
+        setPending(parsePendingAction(res.pending));
         return true;
       } catch (err) {
+        if (controller.signal.aborted || isAbortError(err)) {
+          if (targetId && currentId.current === targetId) {
+            const rows = await listMessages(targetId).catch(() => null);
+            if (rows && currentId.current === targetId && rows.some((row) => row.role === 'user' && row.content === message)) {
+              setMessages(rows);
+            }
+          }
+          return true;
+        }
         setMessages((rows) => rows.filter((m) => m.id !== optimistic.id));
         toast.error(err instanceof Error ? err.message : String(err));
         return false;
       } finally {
-        setSending(false);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          turnRef.current = null;
+          setSending(false);
+        }
       }
     },
-    [conversationId, sending, touch, onConversationCreated]
+    [conversationId, sending, touch, onConversationCreated, modelRef]
   );
 
-  return { messages, pending, loading, sending, notFound, send };
+  return { messages, pending, loading, sending, notFound, send, cancel };
 }

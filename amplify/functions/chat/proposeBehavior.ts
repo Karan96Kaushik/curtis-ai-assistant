@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BEHAVIOR_SLUG, MAX_BEHAVIOR_CHARS } from '../../../lib/contexts/slugs.js';
 import { redactSecrets } from '../../../lib/contexts/redact.js';
-import groqClient from '../../../src/integrations/groqClient.js';
+import aiRouter from '../../../src/integrations/aiRouter.js';
 import { HttpError, json, type HttpResult } from '../_shared/http.js';
 import { contextsTableMissing } from './contextSync.js';
 
@@ -21,7 +21,7 @@ interface GroqChat {
   }): Promise<GroqResult>;
 }
 
-const groq = groqClient as unknown as GroqChat;
+const groq = aiRouter as unknown as GroqChat;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TRANSCRIPT_CHARS = 24_000;

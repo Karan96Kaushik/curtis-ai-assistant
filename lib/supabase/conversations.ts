@@ -27,6 +27,18 @@ export async function renameConversation(id: string, title: string): Promise<voi
   if (error) throw error;
 }
 
+export async function createConversation(title: string): Promise<ConversationSummary> {
+  const { data, error } = await supabase.from('conversations').insert({ title }).select('id, title, updated_at').single();
+  if (error) throw error;
+  return data;
+}
+
+/** Ask the running chat function to abort this turn. Harmless if the turn already finished. */
+export async function requestCancel(conversationId: string, turnId: string): Promise<void> {
+  const { error } = await supabase.from('conversations').update({ cancel_turn_id: turnId }).eq('id', conversationId);
+  if (error) throw error;
+}
+
 export async function deleteConversation(id: string): Promise<void> {
   const { error } = await supabase.from('conversations').delete().eq('id', id);
   if (error) throw error;

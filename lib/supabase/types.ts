@@ -12,6 +12,7 @@ export interface Database {
           title: string;
           agent_history: Json;
           pending_action: Json | null;
+          cancel_turn_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -21,6 +22,7 @@ export interface Database {
           title?: string;
           agent_history?: Json;
           pending_action?: Json | null;
+          cancel_turn_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -28,6 +30,7 @@ export interface Database {
           title?: string;
           agent_history?: Json;
           pending_action?: Json | null;
+          cancel_turn_id?: string | null;
           updated_at?: string;
         };
         Relationships: [];

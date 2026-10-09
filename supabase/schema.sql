@@ -9,6 +9,8 @@ create table public.conversations (
   title text not null default 'New chat' check (char_length(title) between 1 and 200),
   agent_history jsonb not null default '[]'::jsonb,
   pending_action jsonb,
+  -- Set to the in-flight turn id when the user stops a request.
+  cancel_turn_id text check (cancel_turn_id is null or char_length(cancel_turn_id) <= 80),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

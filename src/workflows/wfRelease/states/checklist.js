@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { chat } = require('../../../integrations/groqClient');
+const { chat } = require('../../../integrations/aiRouter');
 const { setField, markUnknown, listUnresolved, FIELD_KEYS } = require('../fields');
 const { audit, setState, STATES } = require('../context');
 const { warn, jiraLink } = require('../helpers');

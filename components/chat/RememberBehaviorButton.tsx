@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { proposeBehaviorMemory } from '@/lib/amplify/chat-functions';
 import { MAX_BEHAVIOR_CHARS } from '@/lib/contexts/slugs';
 import { contextsTableMissing, errorText, saveBehavior } from '@/lib/supabase/contexts';
+import { requestCancel } from '@/lib/supabase/conversations';
 
 type Phase = 'loading' | 'review' | 'saving';
 
@@ -30,9 +31,11 @@ function explain(err: unknown): string {
 
 export default function RememberBehaviorButton({
   conversationId,
+  model,
   disabled,
 }: {
   conversationId: string;
+  model: string;
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -42,9 +45,22 @@ export default function RememberBehaviorButton({
   const [content, setContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const turnRef = useRef<{ conversationId: string; turnId: string } | null>(null);
+
+  function stopReading() {
+    abortRef.current?.abort();
+    const turn = turnRef.current;
+    if (!turn) return;
+    void requestCancel(turn.conversationId, turn.turnId).catch(() => {});
+  }
 
   async function start() {
     const id = ++requestId.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const turnId = crypto.randomUUID();
+    turnRef.current = { conversationId, turnId };
     setOpen(true);
     setPhase('loading');
     setError(null);
@@ -52,14 +68,16 @@ export default function RememberBehaviorButton({
     setContent('');
     setPrevious('');
     try {
-      const proposal = await proposeBehaviorMemory(conversationId);
-      if (requestId.current !== id) return;
+      const proposal = await proposeBehaviorMemory(conversationId, { signal: controller.signal, model, turnId });
+      if (controller.signal.aborted || requestId.current !== id) return;
       setSummary(proposal.summary);
       setPrevious(proposal.previous ?? '');
       setContent(proposal.content ?? '');
       setPhase('review');
     } catch (err) {
-      if (requestId.current !== id) return;
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError') || requestId.current !== id) {
+        return;
+      }
       setError(explain(err));
       setPhase('review');
     }
@@ -96,7 +114,13 @@ export default function RememberBehaviorButton({
         Save behavior
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && phase === 'loading') stopReading();
+          setOpen(next);
+        }}
+      >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Save behavior from this chat</DialogTitle>
@@ -133,8 +157,16 @@ export default function RememberBehaviorButton({
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={phase === 'saving'}>
-              {error ? 'Close' : 'Discard'}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (phase === 'loading') stopReading();
+                setOpen(false);
+              }}
+              disabled={phase === 'saving'}
+            >
+              {phase === 'loading' ? 'Stop' : error ? 'Close' : 'Discard'}
             </Button>
             {!error && phase !== 'loading' && (
               <Button type="button" onClick={() => void approve()} disabled={!canApprove}>

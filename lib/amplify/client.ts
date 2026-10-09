@@ -36,7 +36,7 @@ export class FunctionCallError extends Error {
 export async function callFunction<TResponse>(
   key: FunctionKey,
   body: unknown,
-  { auth = 'required' }: { auth?: 'required' | 'optional' } = {}
+  { auth = 'required', signal }: { auth?: 'required' | 'optional'; signal?: AbortSignal } = {}
 ): Promise<TResponse> {
   const url = functionUrl(key);
   if (!url) throw new FunctionConfigError(key);
@@ -54,6 +54,7 @@ export async function callFunction<TResponse>(
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   const text = await res.text();

@@ -1,4 +1,4 @@
-const { chat, isConfigured, DEFAULT_MODEL } = require('../integrations/groqClient');
+const { chat, isConfigured, activeModel, providerLabel } = require('../integrations/aiRouter');
 const conversationStore = require('./conversationStore');
 const orgMemory = require('./orgMemory');
 const behaviorMemory = require('./behaviorMemory');
@@ -323,7 +323,7 @@ function buildSystemPrompt(discordCtx, turn) {
     `- Guild id: ${discordCtx.guildId || '(DM)'}`,
     `- Channel type: ${discordCtx.channelType || 'unknown'}`,
     '',
-    `Model: ${DEFAULT_MODEL} via Groq.`,
+    `Model: ${activeModel()} via ${providerLabel()}.`,
   ].join('\n');
 }
 
@@ -482,7 +482,7 @@ function shouldSynthesize(intent, toolResults) {
  */
 async function handleUserMessage({ text, discord }) {
   if (!isConfigured()) {
-    throw new Error('GROQ_API_KEY is not set');
+    throw new Error(providerLabel() === 'AI Studio' ? 'GOOGLE_AI_STUDIO_API_KEY is not set' : 'GROQ_API_KEY is not set');
   }
 
   const total = startTimer('agent.handleUserMessage');

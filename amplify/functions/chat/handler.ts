@@ -9,13 +9,24 @@ import {
   type StateFile,
   type StoredPendingAction,
 } from './agentRuntime.js';
+import aiRouter from '../../../src/integrations/aiRouter.js';
+import { isAgentModel, resolveAgentModel } from '../../../lib/chat/models.js';
+import { isCancelError, watchCancellation } from './cancellation.js';
 import { applyContexts, backfillOrgMemory, loadContexts, persistableFiles, syncContextsFromTurn } from './contextSync.js';
 import { proposeBehavior } from './proposeBehavior.js';
+
+const { runWithTurn } = aiRouter as unknown as {
+  runWithTurn<T>(ctx: { model?: string; signal?: AbortSignal }, fn: () => Promise<T>): Promise<T>;
+};
 
 interface ChatRequest {
   action?: 'send' | 'propose-behavior';
   conversationId?: string | null;
   message?: string;
+  /** Allow-listed Groq or Google AI Studio model id. Omitted requests use the server default. */
+  model?: string;
+  /** Client id for this turn, so Stop can mark it cancelled. */
+  turnId?: string;
 }
 
 interface ConversationRow {
@@ -130,6 +141,20 @@ function pendingSummary(pending: StoredPendingAction | null) {
   return pending ? { tool: pending.tool, summary: pending.summary, createdAt: pending.createdAt } : null;
 }
 
+function requestedModel(body: ChatRequest): string {
+  if (body.model != null && typeof body.model !== 'string') throw new HttpError(400, 'model must be a string');
+  if (typeof body.model === 'string' && body.model && !isAgentModel(body.model)) {
+    throw new HttpError(400, 'That model is not available');
+  }
+  return resolveAgentModel(body.model, process.env.GROQ_MODEL);
+}
+
+function requestedTurnId(body: ChatRequest): string | null {
+  if (body.turnId == null || body.turnId === '') return null;
+  if (typeof body.turnId !== 'string' || !UUID_RE.test(body.turnId)) throw new HttpError(400, 'turnId must be a UUID');
+  return body.turnId;
+}
+
 export const handler = withHttp('chat', async (event) => {
   const caller = await requireAllowedCaller(event);
   enforceRateLimit(`chat:${caller.userId}`, { limit: 20, windowMs: 60_000 });
@@ -138,8 +163,20 @@ export const handler = withHttp('chat', async (event) => {
   const db = supabaseForCaller(caller);
 
   if (body.action === 'propose-behavior') {
-    if (typeof body.conversationId !== 'string') throw new HttpError(400, 'conversationId must be a UUID');
-    return proposeBehavior(db, body.conversationId);
+    const behaviorConversationId = body.conversationId;
+    if (typeof behaviorConversationId !== 'string') throw new HttpError(400, 'conversationId must be a UUID');
+    const model = requestedModel(body);
+    const turnId = requestedTurnId(body);
+    const controller = new AbortController();
+    const stopWatch = watchCancellation(db, behaviorConversationId, turnId, controller);
+    try {
+      return await runWithTurn({ model, signal: controller.signal }, () => proposeBehavior(db, behaviorConversationId));
+    } catch (err) {
+      if (isCancelError(err, controller.signal)) throw new HttpError(499, 'Cancelled');
+      throw err;
+    } finally {
+      stopWatch();
+    }
   }
   if (body.action != null && body.action !== 'send') throw new HttpError(400, 'Unknown action');
 
@@ -152,6 +189,8 @@ export const handler = withHttp('chat', async (event) => {
   if (conversationId !== null && (typeof conversationId !== 'string' || !UUID_RE.test(conversationId))) {
     throw new HttpError(400, 'conversationId must be a UUID');
   }
+  const model = requestedModel(body);
+  const turnId = requestedTurnId(body);
 
   const conversation = conversationId
     ? await loadConversation(db, conversationId)
@@ -176,22 +215,31 @@ export const handler = withHttp('chat', async (event) => {
   const files = contextsState.enabled ? applyContexts(loadedFiles, contexts) : loadedFiles;
 
   let updated: ConversationRow;
-  let reply: MessageRow;
+  let reply: MessageRow | null;
+  const controller = new AbortController();
+  const stopWatch = watchCancellation(db, conversation.id, turnId, controller);
   try {
-    const turn = await runAgentTurn({
-      conversationId: conversation.id,
-      user: {
-        id: caller.userId,
-        email: caller.email,
-        displayName: caller.email?.split('@')[0] ?? 'there',
-      },
-      text,
-      snapshot: {
-        history: conversation.agent_history ?? [],
-        pending: conversation.pending_action,
-        files,
-      },
-    });
+    const turn = await runWithTurn({ model, signal: controller.signal }, () =>
+      runAgentTurn({
+        conversationId: conversation.id,
+        user: {
+          id: caller.userId,
+          email: caller.email,
+          displayName: caller.email?.split('@')[0] ?? 'there',
+        },
+        text,
+        snapshot: {
+          history: conversation.agent_history ?? [],
+          pending: conversation.pending_action,
+          files,
+        },
+      })
+    );
+    if (controller.signal.aborted) {
+      const cancelled = new Error('Cancelled');
+      cancelled.name = 'AbortError';
+      throw cancelled;
+    }
     const persisted = persistableFiles(turn.changedFiles, turn.removedPaths, loadedFiles);
     await saveFiles(db, caller, persisted.changed, persisted.removed);
     if (contextsState.enabled) {
@@ -207,11 +255,22 @@ export const handler = withHttp('chat', async (event) => {
     });
     reply = await insertMessage(db, caller, conversation.id, 'assistant', turn.reply || '(No response)');
   } catch (err) {
+    if (isCancelError(err, controller.signal)) {
+      return json(200, {
+        cancelled: true,
+        conversation: { id: conversation.id, title: conversation.title, updated_at: conversation.updated_at },
+        userMessage,
+        reply: null,
+        pending: pendingSummary(conversation.pending_action),
+      });
+    }
     if (err instanceof HttpError) throw err;
     console.error('[chat] agent turn failed:', err);
     const message = err instanceof Error ? err.message : String(err);
     updated = await updateConversation(db, conversation.id, {});
     reply = await insertMessage(db, caller, conversation.id, 'error', `Error: ${message}`);
+  } finally {
+    stopWatch();
   }
 
   return json(200, {

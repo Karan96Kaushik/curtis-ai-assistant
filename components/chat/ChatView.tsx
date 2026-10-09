@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { useAgentModel } from '@/hooks/useAgentModel';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import Composer from '@/components/chat/Composer';
@@ -18,11 +19,18 @@ export default function ChatView() {
   const navigate = useNavigate();
   const { conversations } = useConversations();
 
+  const { model, setModel, models } = useAgentModel();
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
   const onConversationCreated = useCallback(
     (id: string) => navigate(`/c/${id}`, { replace: true }),
     [navigate]
   );
-  const { messages, pending, loading, sending, notFound, send } = useChat(conversationId, { onConversationCreated });
+  const { messages, pending, loading, sending, notFound, send, cancel } = useChat(conversationId, {
+    onConversationCreated,
+    modelRef,
+  });
 
   const title = conversations.find((c) => c.id === conversationId)?.title;
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -46,6 +54,7 @@ export default function ChatView() {
           <div className="ml-auto">
             <RememberBehaviorButton
               conversationId={conversationId}
+              model={model}
               disabled={disabled || sending || loading || notFound || messages.length === 0}
             />
           </div>
@@ -86,7 +95,16 @@ export default function ChatView() {
             onCancel={() => void send('cancel')}
           />
         )}
-        <Composer sending={sending} disabled={disabled} onSend={send} autoFocusKey={conversationId ?? 'new'} />
+        <Composer
+          sending={sending}
+          disabled={disabled}
+          onSend={send}
+          onCancel={cancel}
+          model={model}
+          models={models}
+          onModelChange={setModel}
+          autoFocusKey={conversationId ?? 'new'}
+        />
         <p className="text-center text-xs text-muted-foreground">
           Curtis can make mistakes. Jira, GitHub, and behavior changes run only after you confirm.
         </p>

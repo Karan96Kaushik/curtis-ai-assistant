@@ -2,7 +2,7 @@
  * L6 — Final synthesis pass (no tools): answer from evidence + mode pack only.
  */
 
-const { chat } = require('../integrations/groqClient');
+const { chat } = require('../integrations/aiRouter');
 const { packsForIntent } = require('./promptPacks');
 const { formatPlanForPrompt } = require('./planner');
 const { startTimer } = require('../util/timing');
