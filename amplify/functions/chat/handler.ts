@@ -9,10 +9,13 @@ import {
   type StateFile,
   type StoredPendingAction,
 } from './agentRuntime.js';
+import { applyContexts, backfillOrgMemory, loadContexts, persistableFiles, syncContextsFromTurn } from './contextSync.js';
+import { proposeBehavior } from './proposeBehavior.js';
 
 interface ChatRequest {
-  conversationId: string | null;
-  message: string;
+  action?: 'send' | 'propose-behavior';
+  conversationId?: string | null;
+  message?: string;
 }
 
 interface ConversationRow {
@@ -132,6 +135,14 @@ export const handler = withHttp('chat', async (event) => {
   enforceRateLimit(`chat:${caller.userId}`, { limit: 20, windowMs: 60_000 });
 
   const body = parseBody<ChatRequest>(event);
+  const db = supabaseForCaller(caller);
+
+  if (body.action === 'propose-behavior') {
+    if (typeof body.conversationId !== 'string') throw new HttpError(400, 'conversationId must be a UUID');
+    return proposeBehavior(db, body.conversationId);
+  }
+  if (body.action != null && body.action !== 'send') throw new HttpError(400, 'Unknown action');
+
   const text = typeof body.message === 'string' ? body.message.trim() : '';
   if (!text) throw new HttpError(400, 'message is required');
   if (text.length > MAX_MESSAGE_CHARS) {
@@ -142,12 +153,27 @@ export const handler = withHttp('chat', async (event) => {
     throw new HttpError(400, 'conversationId must be a UUID');
   }
 
-  const db = supabaseForCaller(caller);
   const conversation = conversationId
     ? await loadConversation(db, conversationId)
     : await createConversation(db, caller, text);
   const userMessage = await insertMessage(db, caller, conversation.id, 'user', text);
-  const files = await loadFiles(db);
+  const loadedFiles = await loadFiles(db);
+  let contextsState;
+  try {
+    contextsState = await loadContexts(db);
+  } catch (err) {
+    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'unknown error';
+    throw dbError('load contexts', { message });
+  }
+  let contexts = contextsState.rows;
+  if (contextsState.enabled) {
+    try {
+      contexts = await backfillOrgMemory(db, caller.userId, loadedFiles, contexts);
+    } catch (err) {
+      console.error('[chat] org memory backfill failed:', err);
+    }
+  }
+  const files = contextsState.enabled ? applyContexts(loadedFiles, contexts) : loadedFiles;
 
   let updated: ConversationRow;
   let reply: MessageRow;
@@ -166,7 +192,15 @@ export const handler = withHttp('chat', async (event) => {
         files,
       },
     });
-    await saveFiles(db, caller, turn.changedFiles, turn.removedPaths);
+    const persisted = persistableFiles(turn.changedFiles, turn.removedPaths, loadedFiles);
+    await saveFiles(db, caller, persisted.changed, persisted.removed);
+    if (contextsState.enabled) {
+      try {
+        await syncContextsFromTurn(db, caller.userId, contexts, turn.changedFiles, turn.removedPaths);
+      } catch (err) {
+        console.error('[chat] context sync failed:', err);
+      }
+    }
     updated = await updateConversation(db, conversation.id, {
       agent_history: turn.history,
       pending_action: turn.pending,

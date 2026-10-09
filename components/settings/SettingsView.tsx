@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ContextsCard from '@/components/settings/ContextsCard';
 import { useAuth } from '@/hooks/useAuth';
 import { functionsConfigured } from '@/lib/amplify/client';
 import { newPasswordSchema, type NewPasswordValues } from '@/lib/auth/schemas';
@@ -98,6 +99,8 @@ export default function SettingsView() {
             </Button>
           </CardContent>
         </Card>
+
+        <ContextsCard />
 
         <Card>
           <CardHeader>

@@ -1,5 +1,6 @@
 const registry = require('../core/moduleRegistry');
 const orgMemory = require('../ai/orgMemory');
+const storedContexts = require('../ai/storedContexts');
 
 registry.register({
   id: 'memory',
@@ -56,6 +57,28 @@ registry.register({
           properties: {
             max_chars: { type: 'integer', description: 'Max characters from the end (default 4000).' },
           },
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'context_list',
+        description: 'List stored reference contexts (org memory, specs, and other documents). Does not include behavior memory.',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'context_read',
+        description: 'Read one stored reference context by slug (for example org-memory or a saved spec).',
+        parameters: {
+          type: 'object',
+          properties: {
+            slug: { type: 'string', description: 'Context slug from context_list.' },
+          },
+          required: ['slug'],
         },
       },
     }
@@ -120,7 +143,39 @@ registry.register({
         text,
         envelope: { ok: true, source: 'org-memory', confidence: 'high', data: { bytes: Buffer.byteLength(full, 'utf8') } }
       };
-    }
+    },
+    context_list: async () => {
+      const rows = storedContexts.listEntries();
+      const text = rows.length
+        ? ['Stored contexts:', ...rows.map((row) => `- ${row.slug}: ${row.title}`)].join('\n')
+        : 'No stored contexts.';
+      return {
+        text,
+        envelope: { ok: true, source: 'contexts', confidence: 'high', data: { count: rows.length } },
+      };
+    },
+    context_read: async (args) => {
+      const slug = args.slug != null ? String(args.slug).trim() : '';
+      if (!slug) {
+        return {
+          text: 'Error: context_read requires a slug. Call context_list first.',
+          envelope: { ok: false, source: 'contexts', confidence: 'high', data: null, error: 'empty' },
+        };
+      }
+      try {
+        const body = storedContexts.clip(storedContexts.readBySlug(slug));
+        const text = body.trim() ? `Context ${slug}:\n\n${body}` : `Context ${slug} is empty or not stored.`;
+        return {
+          text,
+          envelope: { ok: true, source: 'contexts', confidence: 'high', data: { slug, bytes: Buffer.byteLength(body, 'utf8') } },
+        };
+      } catch (err) {
+        return {
+          text: `Error: context_read failed: ${err.message || err}`,
+          envelope: { ok: false, source: 'contexts', confidence: 'high', data: null, error: err.message || String(err) },
+        };
+      }
+    },
   },
 
   promptPack: () => {
@@ -129,6 +184,8 @@ registry.register({
       '- "Remember / keep for later" → memory_append (prefer) or memory_write.',
       '- "What do you remember?" → memory_read.',
       '- Prefer short domain lessons + key tickets, not huge dumps.',
+      '- Specs and other saved documents: context_list, then context_read. Do not invent their contents.',
+      '- Behavior preferences are already in the prompt when the user has approved them. Do not write behavior memory yourself.',
     ].join('\n');
   },
 

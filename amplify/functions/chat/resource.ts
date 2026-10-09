@@ -40,6 +40,7 @@ export const chat = defineFunction({
     CURTIS_SURFACE: 'web',
     CURTIS_STATE_DIR: STATE_DIR,
     ORG_MEMORY_PATH: `${STATE_DIR}/org-memory.md`,
+    BEHAVIOR_MEMORY_PATH: `${STATE_DIR}/behavior.md`,
     WF_RELEASE_DIR: `${STATE_DIR}/releases`,
     GROQ_API_KEY: secret('GROQ_API_KEY'),
     JIRA_API_TOKEN: secret('JIRA_API_TOKEN'),

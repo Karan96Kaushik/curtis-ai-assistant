@@ -48,7 +48,7 @@ function toolsForIntent(intent, opts = {}) {
   const confirmOn = opts.confirmOn !== false;
   const hasPending = Boolean(opts.hasPending);
 
-  const allowed = new Set(['clear_context', 'clear_chat', 'think', 'memory_read']);
+  const allowed = new Set(['clear_context', 'clear_chat', 'think', 'memory_read', 'context_list', 'context_read']);
 
   if (confirmOn && (hasPending || intent.mode === 'confirm' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release')) {
     allowed.add('confirm_pending');

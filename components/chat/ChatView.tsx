@@ -5,6 +5,7 @@ import Composer from '@/components/chat/Composer';
 import EmptyState from '@/components/chat/EmptyState';
 import MessageBubble from '@/components/chat/MessageBubble';
 import PendingActionBar from '@/components/chat/PendingActionBar';
+import RememberBehaviorButton from '@/components/chat/RememberBehaviorButton';
 import WorkingIndicator from '@/components/chat/WorkingIndicator';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/hooks/useChat';
@@ -40,8 +41,14 @@ export default function ChatView() {
   return (
     <div className="flex h-full flex-col">
       {conversationId && (
-        <div className="hidden h-14 shrink-0 items-center border-b px-6 md:flex">
-          <h1 className="truncate text-sm font-medium">{title ?? 'Chat'}</h1>
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
+          <h1 className="hidden min-w-0 flex-1 truncate text-sm font-medium md:block">{title ?? 'Chat'}</h1>
+          <div className="ml-auto">
+            <RememberBehaviorButton
+              conversationId={conversationId}
+              disabled={disabled || sending || loading || notFound || messages.length === 0}
+            />
+          </div>
         </div>
       )}
 
@@ -81,7 +88,7 @@ export default function ChatView() {
         )}
         <Composer sending={sending} disabled={disabled} onSend={send} autoFocusKey={conversationId ?? 'new'} />
         <p className="text-center text-xs text-muted-foreground">
-          Curtis can make mistakes. Jira and GitHub changes run only after you confirm.
+          Curtis can make mistakes. Jira, GitHub, and behavior changes run only after you confirm.
         </p>
       </div>
     </div>

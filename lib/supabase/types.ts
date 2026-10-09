@@ -79,6 +79,31 @@ export interface Database {
         };
         Relationships: [];
       };
+      contexts: {
+        Row: {
+          user_id: string;
+          slug: string;
+          title: string;
+          kind: 'reference' | 'behavior';
+          content: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          slug: string;
+          title: string;
+          kind: 'reference' | 'behavior';
+          content?: string;
+          updated_at?: string;
+        };
+        Update: {
+          title?: string;
+          kind?: 'reference' | 'behavior';
+          content?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };
@@ -94,3 +119,4 @@ export type ConversationSummary = Pick<ConversationRow, 'id' | 'title' | 'update
 export type MessageRow = Tables['messages']['Row'];
 export type ChatMessage = Pick<MessageRow, 'id' | 'conversation_id' | 'role' | 'content' | 'created_at'>;
 export type AgentFileRow = Tables['agent_files']['Row'];
+export type ContextRow = Tables['contexts']['Row'];

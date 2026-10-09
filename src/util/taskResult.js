@@ -36,7 +36,7 @@ function confidenceFromSource(source) {
   if (!s || s === 'unknown') return 'none';
   if (s === 'mock') return 'low';
   if (s === 'duckduckgo-html' || s === 'scrape') return 'medium';
-  if (s === 'serper' || s === 'serpapi' || s === 'jira' || s === 'github' || s === 'org-memory') return 'high';
+  if (s === 'serper' || s === 'serpapi' || s === 'jira' || s === 'github' || s === 'org-memory' || s === 'contexts') return 'high';
   return 'medium';
 }
 

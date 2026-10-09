@@ -17,5 +17,16 @@ export interface SendChatResponse {
 }
 
 export function sendChatMessage(request: SendChatRequest): Promise<SendChatResponse> {
-  return callFunction<SendChatResponse>('chat', request);
+  return callFunction<SendChatResponse>('chat', { action: 'send', ...request });
+}
+
+export interface BehaviorProposal {
+  summary: string;
+  content: string;
+  previous: string;
+}
+
+/** Ask the model to draft behavior memory from a chat. Nothing is stored until the user approves. */
+export function proposeBehaviorMemory(conversationId: string): Promise<BehaviorProposal> {
+  return callFunction<BehaviorProposal>('chat', { action: 'propose-behavior', conversationId });
 }

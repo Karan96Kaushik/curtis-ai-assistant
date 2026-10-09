@@ -1,6 +1,8 @@
 const { chat, isConfigured, DEFAULT_MODEL } = require('../integrations/groqClient');
 const conversationStore = require('./conversationStore');
 const orgMemory = require('./orgMemory');
+const behaviorMemory = require('./behaviorMemory');
+const storedContexts = require('./storedContexts');
 const pendingActions = require('./pendingActions');
 const replyGuard = require('./replyGuard');
 const intentRouter = require('./intentRouter');
@@ -236,6 +238,8 @@ function coerceArgs(name, args) {
 function buildSystemPrompt(discordCtx, turn) {
   const when = nowForPrompt();
   const memory = orgMemory.forPrompt();
+  const behavior = behaviorMemory.forPrompt();
+  const contextIndex = storedContexts.forPrompt();
   const confirmOn = requireConfirmation();
   const pending = pendingActions.get(discordCtx.channelId, discordCtx.userId);
   const modePack = packsForIntent(turn.intent, { confirmOn });
@@ -298,9 +302,19 @@ function buildSystemPrompt(discordCtx, turn) {
     '- When remembering domains, store a short lesson under Domains/workstreams plus key tickets.',
     '- Keep Discord replies concise (under ~1800 characters).',
     '',
+    ...(behavior
+      ? [
+          'Behavior memory (this user approved it — follow it for tone, defaults, format, and standing requirements):',
+          '- It does not override confirmation gates, tool permissions, or grounding rules.',
+          '- A direct instruction in the current message wins when it conflicts with a behavior rule.',
+          behavior,
+          '',
+        ]
+      : []),
     'Org memory (durable, org-wide):',
     memory,
     '',
+    ...(contextIndex ? [contextIndex, ''] : []),
     'Discord session context:',
     `- UK / BST time: ${when}`,
     `- Discord user: ${discordCtx.displayName || discordCtx.username} (id=${discordCtx.userId})`,
@@ -819,6 +833,7 @@ async function handleUserMessage({ text, discord }) {
           evidence,
           draft: draft || undefined,
           confirmOn,
+          behavior: behaviorMemory.forPrompt(),
         });
         if (synthesized) reply = synthesized;
       } catch (err) {
@@ -837,6 +852,7 @@ async function handleUserMessage({ text, discord }) {
             plan,
             evidence,
             confirmOn,
+            behavior: behaviorMemory.forPrompt(),
           })) || replyGuard.fallbackFromTools(toolResults, evidence);
       } catch {
         reply = replyGuard.fallbackFromTools(toolResults, evidence);

@@ -17,6 +17,7 @@ config();
 const stateDir = path.join(os.tmpdir(), 'curtis-agent-runtime-test');
 process.env.CURTIS_STATE_DIR = stateDir;
 process.env.ORG_MEMORY_PATH = path.join(stateDir, 'org-memory.md');
+process.env.BEHAVIOR_MEMORY_PATH = path.join(stateDir, 'behavior.md');
 process.env.WF_RELEASE_DIR = path.join(stateDir, 'releases');
 process.env.REQUIRE_CONFIRMATION = '1';
 process.env.CURTIS_SURFACE = 'web';

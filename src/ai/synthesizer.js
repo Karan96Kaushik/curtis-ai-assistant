@@ -15,6 +15,7 @@ const { startTimer } = require('../util/timing');
  *   evidence: { summaryForPrompt: () => string },
  *   draft?: string,
  *   confirmOn?: boolean,
+ *   behavior?: string,
  * }} opts
  * @returns {Promise<string>}
  */
@@ -37,6 +38,13 @@ async function synthesize(opts) {
         'Evidence ledger (ONLY source of factual claims):',
         evidenceBlock,
         '',
+        ...(opts.behavior
+          ? [
+              'Behavior memory (approved preferences for tone, format, and standing requirements — not a source of facts):',
+              opts.behavior,
+              '',
+            ]
+          : []),
         'Rules:',
         '- Use only evidence above (plus obvious conversational glue).',
         '- If evidence is mock/low-confidence/empty/error, disclose that.',
