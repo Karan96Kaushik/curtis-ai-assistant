@@ -121,7 +121,7 @@ async function maybeStage(outcome, discordCtx) {
     clearStaleReleasePending(discordCtx, outcome?.ctx?.workflow?.id);
     return base;
   }
-  return stageOrExecute(
+  const staged = await stageOrExecute(
     'wf_release_execute_pending',
     base.pendingArgs,
     discordCtx || {},
@@ -131,6 +131,9 @@ async function maybeStage(outcome, discordCtx) {
     },
     { domainLabel: 'GitHub/Jira (release workflow)' }
   );
+  if (!staged?.envelope?.data?.staged) return staged;
+  // Keep the engine's text (step results, links, the next-step prompt) above the gate notice.
+  return { ...staged, text: `${base.text}\n\n${staged.text}` };
 }
 
 /**
