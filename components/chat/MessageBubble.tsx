@@ -6,7 +6,7 @@ import { BrandMark } from '@/components/layout/BrandMark';
 import { Button } from '@/components/ui/button';
 import type { DisplayMessage } from '@/hooks/useChat';
 import { formatResponseDuration } from '@/lib/chat/duration';
-import modelCatalog from '@/src/integrations/modelCatalog.js';
+import { splitModelSwitch } from '@/src/integrations/modelCatalog.js';
 import { cn } from '@/lib/utils';
 
 function CopyButton({ text }: { text: string }) {
@@ -39,7 +39,7 @@ function Duration({ ms }: { ms: number | null }) {
 }
 
 function MessageBubble({ message, durationMs }: { message: DisplayMessage; durationMs: number | null }) {
-  const { body, notice } = modelCatalog.splitModelSwitch(message.content);
+  const { body, notice } = splitModelSwitch(message.content);
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">

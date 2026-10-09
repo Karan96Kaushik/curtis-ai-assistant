@@ -12,6 +12,13 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    // Vite converts CommonJS only under node_modules. The chat UI imports
+    // modelCatalog.js, which is CommonJS (`module.exports`).
+    commonjsOptions: {
+      include: [/node_modules/, /src\/integrations\/modelCatalog\.js/],
+    },
+  },
   // The repo root also holds the Firefox extension's HTML pages; only crawl the SPA.
   optimizeDeps: {
     entries: ['index.html'],
