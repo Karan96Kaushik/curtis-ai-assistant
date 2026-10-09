@@ -95,8 +95,8 @@ export interface Database {
           sub_text: string | null;
           big_text: string | null;
           category: string | null;
-          posted_at: string | null;
-          created_at: string | null;
+          posted_at: number | string | null;
+          created_at: number | string | null;
         };
         Insert: {
           user_id: string;
@@ -109,8 +109,8 @@ export interface Database {
           sub_text?: string | null;
           big_text?: string | null;
           category?: string | null;
-          posted_at?: string | null;
-          created_at?: string | null;
+          posted_at?: number | string | null;
+          created_at?: number | string | null;
         };
         Update: {
           local_id?: number | null;
@@ -122,8 +122,8 @@ export interface Database {
           sub_text?: string | null;
           big_text?: string | null;
           category?: string | null;
-          posted_at?: string | null;
-          created_at?: string | null;
+          posted_at?: number | string | null;
+          created_at?: number | string | null;
         };
         Relationships: [];
       };

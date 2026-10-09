@@ -32,8 +32,21 @@ interface NotificationQueryRow {
   sub_text: string | null;
   big_text: string | null;
   category: string | null;
-  posted_at?: string | null;
-  created_at?: string | null;
+  posted_at?: number | string | null;
+  created_at?: number | string | null;
+}
+
+/** `posted_at` is a bigint: Android postTime in milliseconds, or unix seconds. */
+function postedAtIso(value: number | string | null | undefined): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string' && /[T-]/.test(value)) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  }
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const ms = n >= 1e11 ? n : n * 1000;
+  return new Date(ms).toISOString();
 }
 
 function notificationBody(row: NotificationQueryRow): string {
@@ -45,14 +58,15 @@ function notificationBody(row: NotificationQueryRow): string {
   return main;
 }
 
-function toItem(row: NotificationQueryRow, postedAt: string | null | undefined): PhoneNotificationItem | null {
-  if (!postedAt) return null;
+function toItem(row: NotificationQueryRow, postedAt: number | string | null | undefined): PhoneNotificationItem | null {
+  const iso = postedAtIso(postedAt);
+  if (!iso) return null;
   return {
     appName: (row.app_name || row.package_name || '').trim(),
     title: (row.title || '').trim(),
     text: notificationBody(row).slice(0, MAX_BODY_CHARS),
     category: (row.category || '').trim(),
-    postedAt,
+    postedAt: iso,
   };
 }
 
@@ -69,7 +83,7 @@ export async function listPhoneNotifications(
   const userId = userData.user?.id;
   if (!userId) throw new Error('Sign in to read phone notifications.');
 
-  const since = new Date(Date.now() - durationMinutes * 60_000).toISOString();
+  const sinceMs = Date.now() - durationMinutes * 60_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
   const onAbort = () => controller.abort();
@@ -81,7 +95,7 @@ export async function listPhoneNotifications(
       .from('notifications')
       .select('app_name, package_name, title, text, sub_text, big_text, category, posted_at')
       .eq('user_id', userId)
-      .gte('posted_at', since)
+      .gte('posted_at', sinceMs)
       .order('posted_at', { ascending: false })
       .limit(MAX_ITEMS + 1)
       .abortSignal(controller.signal);
@@ -93,7 +107,7 @@ export async function listPhoneNotifications(
         .from('notifications')
         .select('app_name, package_name, title, text, sub_text, big_text, category, created_at')
         .eq('user_id', userId)
-        .gte('created_at', since)
+        .gte('created_at', sinceMs)
         .order('created_at', { ascending: false })
         .limit(MAX_ITEMS + 1)
         .abortSignal(controller.signal);
