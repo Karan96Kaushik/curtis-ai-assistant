@@ -8,6 +8,7 @@ require('./timesheet');
 require('./meta');
 require('./schedulerModule');
 require('./memory');
+require('./phoneNotifications');
 require('./web');
 require('./release');
 require('./jira');

@@ -14,6 +14,7 @@ export default function PendingActionBar({
   onConfirm(): void;
   onCancel(): void;
 }) {
+  const sharingPhone = pending.tool === 'request_phone_notifications';
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
       <div className="flex items-center gap-2">
@@ -33,7 +34,7 @@ export default function PendingActionBar({
         </Button>
         <Button size="sm" onClick={onConfirm} disabled={disabled}>
           <Check />
-          Confirm
+          {sharingPhone ? 'Share notifications' : 'Confirm'}
         </Button>
       </div>
     </div>

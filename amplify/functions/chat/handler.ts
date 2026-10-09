@@ -15,6 +15,7 @@ import { isAgentModel, resolveAgentModel } from '../../../lib/chat/models.js';
 import { isCancelError, watchCancellation } from './cancellation.js';
 import { applyContexts, backfillOrgMemory, loadContexts, persistableFiles, syncContextsFromTurn } from './contextSync.js';
 import { proposeBehavior } from './proposeBehavior.js';
+import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 
 interface TurnCtx {
   model: string;
@@ -25,6 +26,12 @@ interface TurnCtx {
 
 const { runWithTurn } = aiRouter as unknown as {
   runWithTurn<T>(ctx: TurnCtx, fn: () => Promise<T>): Promise<T>;
+};
+
+const phone = phoneNotifications as unknown as {
+  TOOL_NAME: string;
+  isConfirmation(text: string): boolean;
+  parseClientPayload(raw: unknown): { context: { durationMinutes: number } | null; error: string | null };
 };
 
 const catalog = modelCatalog as unknown as {
@@ -39,6 +46,11 @@ interface ChatRequest {
   model?: string;
   /** Client id for this turn, so Stop can mark it cancelled. */
   turnId?: string;
+  /**
+   * Phone notifications the browser read after the user confirmed a request.
+   * Ignored unless this message confirms a pending request_phone_notifications action.
+   */
+  phoneNotifications?: unknown;
 }
 
 interface ConversationRow {
@@ -150,7 +162,26 @@ async function updateConversation(
 }
 
 function pendingSummary(pending: StoredPendingAction | null) {
-  return pending ? { tool: pending.tool, summary: pending.summary, createdAt: pending.createdAt } : null;
+  if (!pending) return null;
+  const summary: { tool: string; summary: string; createdAt: number; durationMinutes?: number } = {
+    tool: pending.tool,
+    summary: pending.summary,
+    createdAt: pending.createdAt,
+  };
+  if (pending.tool === phone.TOOL_NAME) {
+    const minutes = pending.args?.duration_minutes;
+    if (typeof minutes === 'number') summary.durationMinutes = minutes;
+  }
+  return summary;
+}
+
+/** Attach a notification window only when this message confirms a staged phone read. */
+function phoneContextForTurn(text: string, pending: StoredPendingAction | null, raw: unknown): unknown {
+  const parsed = phone.parseClientPayload(raw);
+  if (parsed.error) throw new HttpError(400, parsed.error);
+  if (!parsed.context) return null;
+  if (!pending || pending.tool !== phone.TOOL_NAME || !phone.isConfirmation(text)) return null;
+  return parsed.context;
 }
 
 function requestedModel(body: ChatRequest): string {
@@ -247,6 +278,7 @@ export const handler = withHttp('chat', async (event) => {
           pending: conversation.pending_action,
           files,
         },
+        phoneNotifications: phoneContextForTurn(text, conversation.pending_action, body.phoneNotifications),
       })
     );
     if (controller.signal.aborted) {

@@ -82,6 +82,51 @@ export interface Database {
         };
         Relationships: [];
       };
+      notifications: {
+        Row: {
+          id: number;
+          user_id: string;
+          local_id: number | null;
+          device_id: string | null;
+          package_name: string | null;
+          app_name: string | null;
+          title: string | null;
+          text: string | null;
+          sub_text: string | null;
+          big_text: string | null;
+          category: string | null;
+          posted_at: string | null;
+          created_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          local_id?: number | null;
+          device_id?: string | null;
+          package_name?: string | null;
+          app_name?: string | null;
+          title?: string | null;
+          text?: string | null;
+          sub_text?: string | null;
+          big_text?: string | null;
+          category?: string | null;
+          posted_at?: string | null;
+          created_at?: string | null;
+        };
+        Update: {
+          local_id?: number | null;
+          device_id?: string | null;
+          package_name?: string | null;
+          app_name?: string | null;
+          title?: string | null;
+          text?: string | null;
+          sub_text?: string | null;
+          big_text?: string | null;
+          category?: string | null;
+          posted_at?: string | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
       contexts: {
         Row: {
           user_id: string;

@@ -178,6 +178,7 @@ function domainFromTool(tool) {
   if (name.startsWith('teams_')) return 'teams';
   if (name.startsWith('browser_')) return 'browser';
   if (name.startsWith('wf_release_')) return 'release';
+  if (name === 'request_phone_notifications') return 'phone';
   if (name === 'clear_chat' || name === 'clear_context') return 'meta';
   return 'chat';
 }

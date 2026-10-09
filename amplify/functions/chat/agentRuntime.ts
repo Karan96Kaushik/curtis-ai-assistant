@@ -4,6 +4,7 @@ import discordAgent from '../../../src/ai/discordAgent.js';
 import conversationStoreModule from '../../../src/ai/conversationStore.js';
 import pendingActionsModule from '../../../src/ai/pendingActions.js';
 import registry from '../../../src/core/moduleRegistry.js';
+import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 
 /** The slices of the JS stores used here, typed more precisely than their JSDoc. */
 interface ConversationStoreApi {
@@ -143,16 +144,24 @@ function resetMemory(channelId: string, userId: string): void {
  * execution environment at a time, so those stores (and the state dir) are
  * loaded from the snapshot here and wiped again before returning.
  */
+const phone = phoneNotifications as unknown as {
+  setTurnContext(context: unknown): void;
+  clearTurnContext(): void;
+};
+
 export async function runAgentTurn({
   conversationId,
   user,
   text,
   snapshot,
+  phoneNotifications: phoneContext = null,
 }: {
   conversationId: string;
   user: AgentUser;
   text: string;
   snapshot: AgentSnapshot;
+  /** Sanitized notification window for this turn. Null unless the user just confirmed a share. */
+  phoneNotifications?: unknown;
 }): Promise<TurnResult> {
   const channelId = conversationId;
   const userId = user.id;
@@ -166,6 +175,7 @@ export async function runAgentTurn({
   };
 
   resetMemory(channelId, userId);
+  phone.setTurnContext(phoneContext);
   try {
     for (const msg of snapshot.history) {
       conversationStore.appendMessage(channelId, userId, msg.role, msg.content, session);
@@ -215,6 +225,7 @@ export async function runAgentTurn({
       removedPaths: [...before.keys()].filter((p) => !nowPaths.has(p)),
     };
   } finally {
+    phone.clearTurnContext();
     resetMemory(channelId, userId);
     await fs.rm(stateDir(), { recursive: true, force: true });
   }

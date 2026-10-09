@@ -110,7 +110,7 @@ export default function ChatView() {
           autoFocusKey={conversationId ?? 'new'}
         />
         <p className="text-center text-xs text-muted-foreground">
-          Curtis can make mistakes. Jira, GitHub, and behavior changes run only after you confirm.
+          Curtis can make mistakes. Jira, GitHub, behavior changes, and phone notifications run only after you confirm.
         </p>
       </div>
     </div>

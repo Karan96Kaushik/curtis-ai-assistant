@@ -13,6 +13,7 @@ const { packsForIntent } = require('./promptPacks');
 const { toolsForIntent, buildAllTools } = require('./toolRegistry');
 const { synthesize } = require('./synthesizer');
 const workspaceContext = require('./workspaceContext');
+const phoneNotifications = require('./phoneNotifications');
 const identity = require('../integrations/identity');
 const { startTimer } = require('../util/timing');
 const { nowForPrompt } = require('../util/time');
@@ -25,9 +26,6 @@ const MAX_TOOL_ROUNDS = 8;
 /** Read-only tools that must still run one at a time (they touch per-session state). */
 const SERIAL_TOOLS = new Set(['confirm_pending', 'cancel_pending', 'clear_context', 'clear_chat', 'memory_append', 'memory_write']);
 
-const CONFIRM_RE =
-  /^(y|yes|yeah|yep|yup|ok|okay|k|confirm|confirmed|go|go\s*ahead|do\s*it|proceed|approve|approved|lgtm|ship\s*it|sure|sounds\s*good|yes\s*please)([\s.!?]|$)/i;
-
 const CANCEL_RE =
   /^(n|no|nope|nah|cancel|cancelled|canceled|never\s*mind|nevermind|stop|abort|don'?t)([\s.!?]|$)/i;
 
@@ -39,9 +37,7 @@ function requireConfirmation() {
 }
 
 function isUserConfirmation(text) {
-  const t = String(text || '').trim();
-  if (!t || t.length > 80) return false;
-  return CONFIRM_RE.test(t);
+  return phoneNotifications.isConfirmation(text);
 }
 
 function isUserCancellation(text, pending = null) {
@@ -489,8 +485,8 @@ async function handleUserMessage(input) {
     conversationStore.ensureSession(channelId, userId, discord);
     conversationStore.appendMessage(channelId, userId, 'user', text, discord);
 
-    const pending = pendingActions.get(channelId, userId);
-    const hasPending = Boolean(pending);
+    let pending = pendingActions.get(channelId, userId);
+    let hasPending = Boolean(pending);
 
     if (requireConfirmation() && isUserCancellation(text, pending)) {
       if (pending) {
@@ -516,6 +512,30 @@ async function handleUserMessage(input) {
         total.end('auto-cancel');
         return reply;
       }
+    }
+
+    // Phone notifications are read in the browser and attached to this turn.
+    // Keep going so the model can answer the earlier question, instead of dumping the list.
+    if (
+      requireConfirmation() &&
+      isUserConfirmation(text) &&
+      pending?.tool === phoneNotifications.TOOL_NAME
+    ) {
+      const check = phoneNotifications.bindConfirmedContext(pending.args, phoneNotifications.peekTurnContext());
+      if (!check.ok) {
+        const reply = check.message;
+        conversationStore.appendMessage(channelId, userId, 'assistant', reply, discord);
+        prep.end('phone-notifications-missing');
+        total.end('phone-notifications-missing');
+        return reply;
+      }
+      pendingActions.clear(channelId, userId);
+      pending = null;
+      hasPending = false;
+      turnCtx.phoneNotificationContext = check.context;
+      console.log(
+        `[agent] phone notifications shared duration=${check.context.durationMinutes} count=${check.context.items.length}`
+      );
     }
 
     // Fast-path: short yes/confirm executes the staged action without another LLM ask-loop
@@ -565,7 +585,16 @@ async function handleUserMessage(input) {
 
     // L3 — Mode-scoped tools
     const confirmOn = requireConfirmation();
-    const tools = toolsForIntent(intent, { confirmOn, hasPending });
+    let tools = toolsForIntent(intent, { confirmOn, hasPending });
+    if (turnCtx.phoneNotificationContext) {
+      const blocked = new Set([
+        phoneNotifications.TOOL_NAME,
+        'confirm_pending',
+        'memory_append',
+        'memory_write',
+      ]);
+      tools = tools.filter((tool) => !blocked.has(tool.function.name));
+    }
 
     // Identity lookups are cached per process; only block on them for turns that use them.
     const warming = identity.warm();
@@ -577,6 +606,13 @@ async function handleUserMessage(input) {
       { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan, workspace }) },
       ...history,
     ];
+
+    if (turnCtx.phoneNotificationContext) {
+      messages.push({
+        role: 'system',
+        content: phoneNotifications.formatForModel(turnCtx.phoneNotificationContext),
+      });
+    }
 
     if (intent.isWorkAgenda) {
       messages.push({
