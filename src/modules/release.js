@@ -64,7 +64,7 @@ function looksLikeRevisePending(text) {
   return (
     /\b(use|change|set|update|rename)\s+(the\s+)?(title|summary|tag|version)\b/i.test(t) ||
     /\btitle\s*[:=]/i.test(t) ||
-    /\brevise\b/i.test(t) ||
+    /\brevise\b|\bregenerate\b/i.test(t) ||
     /\b(change|edit|update|revise|set|use)\b.{0,40}\b(qa|deploy|tag|version|checklist|rollback|risk|security|summary)\b/i.test(
       t
     ) ||
