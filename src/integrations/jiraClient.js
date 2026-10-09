@@ -16,6 +16,17 @@ function requireEnv(name) {
 }
 
 const { startTimer } = require('../util/timing');
+const { sleep, createLimiter, parseRetryAfterMs } = require('../util/rateLimiter');
+
+const RETRY_STATUSES = new Set([429, 503]);
+const MAX_ATTEMPTS = 4;
+const RETRY_CAP_MS = 60_000;
+
+/** Shared across clients — Jira Cloud rate-limits per user/token. */
+const jiraLimiter = createLimiter({ maxConcurrent: 4, minIntervalMs: 50 });
+
+/** @type {{ key: string, client: object } | null} */
+let cachedClient = null;
 
 
 /**
@@ -144,13 +155,49 @@ function adfToPlainText(node) {
   return kids;
 }
 
+function isJiraConfigured() {
+  return Boolean(process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN);
+}
+
+/**
+ * Jira client. Without overrides, returns one shared instance per env config
+ * so per-process caches (e.g. getMyself) survive across tool calls.
+ */
 function createJiraClient(overrides = {}) {
   const baseUrl = (overrides.baseUrl || requireEnv('JIRA_BASE_URL')).replace(/\/$/, '');
   const email = overrides.email || requireEnv('JIRA_EMAIL');
   const apiToken = overrides.apiToken || requireEnv('JIRA_API_TOKEN');
+  const useCache = !overrides.baseUrl && !overrides.email && !overrides.apiToken;
+  const cacheKey = `${baseUrl}|${email}|${apiToken}`;
+  if (useCache && cachedClient?.key === cacheKey) return cachedClient.client;
+
+  const client = buildJiraClient({ baseUrl, email, apiToken });
+  if (useCache) cachedClient = { key: cacheKey, client };
+  return client;
+}
+
+function buildJiraClient({ baseUrl, email, apiToken }) {
   const auth = Buffer.from(`${email}:${apiToken}`).toString('base64');
+  /** @type {Promise<object> | null} */
+  let myselfPromise = null;
 
   async function request(method, path, body) {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await jiraLimiter(() => requestOnce(method, path, body));
+      } catch (err) {
+        const retryable = err instanceof JiraError && RETRY_STATUSES.has(err.status);
+        if (!retryable || attempt >= MAX_ATTEMPTS) throw err;
+        const wait = Math.min(err.retryAfterMs || 1000 * 2 ** attempt, RETRY_CAP_MS);
+        console.error(
+          `[jira] ${err.status} on ${method} ${path}; retrying in ${Math.ceil(wait / 1000)}s (${attempt}/${MAX_ATTEMPTS - 1})`
+        );
+        await sleep(wait);
+      }
+    }
+  }
+
+  async function requestOnce(method, path, body) {
     const url = `${baseUrl}${path}`;
     const headers = {
       Authorization: `Basic ${auth}`,
@@ -192,7 +239,9 @@ function createJiraClient(overrides = {}) {
             ` — check JIRA_EMAIL and JIRA_API_TOKEN in .env (auth email is "${email}", base "${baseUrl}")`;
         }
         timer.end(`status=${response.status} bytes=${text.length}`);
-        throw new JiraError(message, response.status, data);
+        const error = new JiraError(message, response.status, data);
+        error.retryAfterMs = parseRetryAfterMs(response.headers);
+        throw error;
       }
 
       timer.end(`status=${response.status} bytes=${text.length}`);
@@ -209,8 +258,70 @@ function createJiraClient(overrides = {}) {
     baseUrl,
     email,
 
+    /** Authenticated user; cached for the life of this client (failures are not cached). */
     async getMyself() {
-      return request('GET', '/rest/api/3/myself');
+      if (!myselfPromise) {
+        myselfPromise = request('GET', '/rest/api/3/myself').catch((err) => {
+          myselfPromise = null;
+          throw err;
+        });
+      }
+      return myselfPromise;
+    },
+
+    /**
+     * Find users by name or email fragment.
+     * @param {string} query
+     * @param {{ maxResults?: number }} [opts]
+     */
+    async findUsers(query, { maxResults = 10 } = {}) {
+      const params = new URLSearchParams({ query: String(query || ''), maxResults: String(maxResults) });
+      const data = await request('GET', `/rest/api/3/user/search?${params}`);
+      return Array.isArray(data) ? data : [];
+    },
+
+    /**
+     * Assign an issue; pass null to unassign.
+     * @param {string} issueKey
+     * @param {string|null} accountId
+     */
+    async assignIssue(issueKey, accountId) {
+      await request('PUT', `/rest/api/3/issue/${encodeURIComponent(issueKey)}/assignee`, {
+        accountId: accountId || null,
+      });
+    },
+
+    /**
+     * Log work on an issue.
+     * @param {string} issueKey
+     * @param {{ timeSpent: string, started?: string, comment?: string }} worklog
+     *   timeSpent uses Jira duration syntax ("1h 30m"); started is ISO 8601.
+     */
+    async addWorklog(issueKey, { timeSpent, started, comment } = {}) {
+      const body = { timeSpent: String(timeSpent) };
+      if (started) body.started = toJiraTimestamp(started);
+      if (comment) body.comment = toAdf(comment);
+      return request('POST', `/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`, body);
+    },
+
+    /**
+     * Projects visible to the auth user.
+     * @param {{ query?: string, maxResults?: number }} [opts]
+     */
+    async searchProjects({ query, maxResults = 50 } = {}) {
+      const params = new URLSearchParams({ maxResults: String(maxResults), orderBy: 'name' });
+      if (query) params.set('query', query);
+      const data = await request('GET', `/rest/api/3/project/search?${params}`);
+      return data.values || [];
+    },
+
+    /** Issue types that can be created in a project. */
+    async getCreatableIssueTypes(projectKey) {
+      const data = await request(
+        'GET',
+        `/rest/api/3/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes?maxResults=50`
+      );
+      return data.issueTypes || data.values || [];
     },
 
     async getIssue(issueKey, { fields } = {}) {
@@ -274,20 +385,32 @@ function createJiraClient(overrides = {}) {
     /**
      * Update issue fields (description as markdown).
      * @param {string} issueKey
-     * @param {{ description?: string, summary?: string }} fields
+     * @param {{ description?: string, summary?: string, priority?: string, addLabels?: string[], removeLabels?: string[] }} changes
      */
-    async updateIssue(issueKey, { description, summary } = {}) {
+    async updateIssue(issueKey, { description, summary, priority, addLabels, removeLabels } = {}) {
       const fields = {};
+      const update = {};
       if (description !== undefined) {
         fields.description = toAdf(description);
       }
       if (summary !== undefined) {
         fields.summary = summary;
       }
-      if (!Object.keys(fields).length) {
+      if (priority) {
+        fields.priority = { name: String(priority) };
+      }
+      const labelOps = [
+        ...(addLabels || []).map((l) => ({ add: l })),
+        ...(removeLabels || []).map((l) => ({ remove: l })),
+      ];
+      if (labelOps.length) update.labels = labelOps;
+      if (!Object.keys(fields).length && !Object.keys(update).length) {
         throw new Error('updateIssue requires at least one field');
       }
-      await request('PUT', `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, { fields });
+      const body = {};
+      if (Object.keys(fields).length) body.fields = fields;
+      if (Object.keys(update).length) body.update = update;
+      await request('PUT', `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, body);
       return { updated: true };
     },
 
@@ -362,7 +485,7 @@ function createJiraClient(overrides = {}) {
 
     /**
      * Create a Jira issue.
-     * @param {{ projectKey: string, summary: string, issueType?: string, description?: string, assigneeAccountId?: string, parentKey?: string }} fields
+     * @param {{ projectKey: string, summary: string, issueType?: string, description?: string, assigneeAccountId?: string, parentKey?: string, labels?: string[], priority?: string, components?: string[] }} fields
      */
     async createIssue({
       projectKey,
@@ -371,6 +494,9 @@ function createJiraClient(overrides = {}) {
       description,
       assigneeAccountId,
       parentKey,
+      labels,
+      priority,
+      components,
     }) {
       const fields = {
         project: { key: projectKey },
@@ -385,6 +511,15 @@ function createJiraClient(overrides = {}) {
       }
       if (parentKey) {
         fields.parent = { key: String(parentKey).trim().toUpperCase() };
+      }
+      if (labels?.length) {
+        fields.labels = labels;
+      }
+      if (priority) {
+        fields.priority = { name: String(priority) };
+      }
+      if (components?.length) {
+        fields.components = components.map((name) => ({ name }));
       }
       return request('POST', '/rest/api/3/issue', { fields });
     },
@@ -410,6 +545,13 @@ function createJiraClient(overrides = {}) {
   };
 }
 
+/** Jira wants "2026-10-09T09:00:00.000+0000" — no colon in the offset. */
+function toJiraTimestamp(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new Error(`Invalid start time: ${value}`);
+  return d.toISOString().replace('Z', '+0000');
+}
+
 /**
  * Canonical browse link — never invent domains; always use JIRA_BASE_URL.
  * @param {string} baseUrl
@@ -422,4 +564,12 @@ function browseUrl(baseUrl, issueKey) {
   return `${base}/browse/${key}`;
 }
 
-module.exports = { createJiraClient, JiraError, toAdf, adfToPlainText, browseUrl };
+module.exports = {
+  createJiraClient,
+  isJiraConfigured,
+  JiraError,
+  toAdf,
+  adfToPlainText,
+  browseUrl,
+  toJiraTimestamp,
+};

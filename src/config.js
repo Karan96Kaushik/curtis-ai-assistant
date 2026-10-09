@@ -29,6 +29,21 @@ function envList(name, fallback) {
   return items.length ? items : fallback;
 }
 
+/** "Name=VALUE,Other=VAL2" → { Name: 'VALUE', Other: 'VAL2' } */
+function envMap(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const out = {};
+  for (const pair of String(raw).split(',')) {
+    const i = pair.indexOf('=');
+    if (i <= 0) continue;
+    const key = pair.slice(0, i).trim();
+    const value = pair.slice(i + 1).trim();
+    if (key && value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : fallback;
+}
+
 module.exports = {
   /**
    * Hard gate for AI create/update/delete:
@@ -84,4 +99,26 @@ module.exports = {
    * Override with GITHUB_ACTIVITY_ALL_BRANCHES=0.
    */
   GITHUB_ACTIVITY_ALL_BRANCHES: envBool('GITHUB_ACTIVITY_ALL_BRANCHES', true),
+
+  /**
+   * GitHub orgs that hold the team's code. Scopes cross-searches such as
+   * "PRs mentioning P25-1234" so they never hit unrelated public repos.
+   * Empty → the orgs the GITHUB_TOKEN user belongs to. Override with GITHUB_ORGS.
+   */
+  GITHUB_ORGS: envList('GITHUB_ORGS', []),
+
+  /**
+   * Repos (owner/name) the user works in most; offered to the model as
+   * defaults when a request names no repo. Override with GITHUB_DEFAULT_REPOS.
+   */
+  GITHUB_DEFAULT_REPOS: envList('GITHUB_DEFAULT_REPOS', []),
+
+  /**
+   * Friendly board/project names → Jira project keys.
+   * Override with JIRA_PROJECT_ALIASES="Platform 25=P25,Other Board=OB".
+   */
+  JIRA_PROJECT_ALIASES: envMap('JIRA_PROJECT_ALIASES', { 'Platform 25': 'P25' }),
+
+  /** Link Jira issues and GitHub PRs in tool results. Override with CROSS_LINK_JIRA_GITHUB=0. */
+  CROSS_LINK_JIRA_GITHUB: envBool('CROSS_LINK_JIRA_GITHUB', true),
 };

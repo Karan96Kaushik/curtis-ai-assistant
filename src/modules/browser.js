@@ -77,6 +77,18 @@ registry.register({
     };
   },
 
+  mutatingTools: ['browser_click', 'browser_type'],
+
+  selectTools: (intent, ctx) => {
+    const active = intent.domain === 'browser' || intent.domain === 'mixed' || ctx.fallback;
+    if (!active) return [];
+    const names = ['browser_status', 'browser_list_tabs', 'browser_read_page'];
+    if (ctx.fallback || intent.domain === 'mixed' || ctx.writes) {
+      names.push('browser_open_tab', 'browser_navigate', 'browser_click', 'browser_type');
+    }
+    return names;
+  },
+
   tools: [
     {
       type: 'function',

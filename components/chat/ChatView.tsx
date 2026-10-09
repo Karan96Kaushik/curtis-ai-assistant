@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { useChat } from '@/hooks/useChat';
 import { useConversations } from '@/hooks/useConversations';
 import { functionsConfigured } from '@/lib/amplify/client';
+import { durationBeforeReply } from '@/lib/chat/duration';
 
 export default function ChatView() {
   const params = useParams();
@@ -77,8 +78,8 @@ export default function ChatView() {
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
+            {messages.map((m, i) => (
+              <MessageBubble key={m.id} message={m} durationMs={durationBeforeReply(messages, i)} />
             ))}
             {sending && <WorkingIndicator />}
             <div ref={bottomRef} />
@@ -96,6 +97,7 @@ export default function ChatView() {
           />
         )}
         <Composer
+          conversationId={conversationId}
           sending={sending}
           disabled={disabled}
           onSend={send}

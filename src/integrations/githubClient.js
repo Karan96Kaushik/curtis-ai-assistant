@@ -9,9 +9,7 @@ class GithubError extends Error {
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const { sleep, createLimiter, parseRetryAfterMs } = require('../util/rateLimiter');
 
 /** Authenticated search is 30 req/min; space starts so we stay under that. */
 const SEARCH_MIN_INTERVAL_MS = 2100;
@@ -28,44 +26,6 @@ const RATE_LIMIT_CAP_MS = 5 * 60_000;
  */
 const searchLimiter = createLimiter({ maxConcurrent: 1, minIntervalMs: SEARCH_MIN_INTERVAL_MS });
 const restLimiter = createLimiter({ maxConcurrent: REST_MAX_CONCURRENT, minIntervalMs: REST_MIN_INTERVAL_MS });
-
-function createLimiter({ maxConcurrent, minIntervalMs }) {
-  let active = 0;
-  const waiting = [];
-  let lastStartedAt = 0;
-
-  function pump() {
-    while (active < maxConcurrent && waiting.length) {
-      active += 1;
-      waiting.shift()();
-    }
-  }
-
-  async function acquire() {
-    if (active >= maxConcurrent) {
-      await new Promise((resolve) => waiting.push(resolve));
-    } else {
-      active += 1;
-    }
-    const wait = lastStartedAt + minIntervalMs - Date.now();
-    if (wait > 0) await sleep(wait);
-    lastStartedAt = Date.now();
-  }
-
-  function release() {
-    active -= 1;
-    pump();
-  }
-
-  return async function limit(fn) {
-    await acquire();
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
-  };
-}
 
 function isSearchPath(path) {
   return /\/search\//.test(path);
@@ -86,16 +46,6 @@ function isRateLimited(status, data) {
   if (status !== 403) return false;
   const msg = rateLimitMessage(data).toLowerCase();
   return msg.includes('rate limit') || msg.includes('abuse detection');
-}
-
-function parseRetryAfterMs(headers) {
-  const raw = headers.get('retry-after');
-  if (!raw) return null;
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds)) return Math.max(seconds, 1) * 1000;
-  const when = Date.parse(raw);
-  if (!Number.isNaN(when)) return Math.max(when - Date.now(), 1000);
-  return null;
 }
 
 function resetWaitMs(headers) {
@@ -252,6 +202,17 @@ function parseRepo(ownerOrFull, repo) {
   return { owner: m[1], repo: m[2] };
 }
 
+function isGithubConfigured() {
+  return Boolean(process.env.GITHUB_TOKEN);
+}
+
+/** @type {{ key: string, client: object } | null} */
+let cachedClient = null;
+
+/**
+ * GitHub client. Without overrides, returns one shared instance per token so
+ * per-process caches (e.g. the authenticated user) survive across tool calls.
+ */
 function createGithubClient(overrides = {}) {
   const token = overrides.token || requireEnv('GITHUB_TOKEN');
   const baseUrl = (
@@ -259,6 +220,20 @@ function createGithubClient(overrides = {}) {
     process.env.GITHUB_API_BASE_URL ||
     'https://api.github.com'
   ).replace(/\/$/, '');
+  const useCache = !overrides.token && !overrides.baseUrl;
+  const cacheKey = `${baseUrl}|${token}`;
+  if (useCache && cachedClient?.key === cacheKey) return cachedClient.client;
+
+  const client = buildGithubClient({ token, baseUrl });
+  if (useCache) cachedClient = { key: cacheKey, client };
+  return client;
+}
+
+function buildGithubClient({ token, baseUrl }) {
+  /** @type {Promise<object> | null} */
+  let userPromise = null;
+  const repoPath = (owner, repo) =>
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 
   async function requestOnce(method, path, body) {
     const url = path.startsWith('http') ? path : `${baseUrl}${path}`;
@@ -353,8 +328,81 @@ function createGithubClient(overrides = {}) {
   return {
     baseUrl,
 
+    /** Authenticated user; cached for the life of this client (failures are not cached). */
     async getAuthenticatedUser() {
-      return request('GET', '/user');
+      if (!userPromise) {
+        userPromise = request('GET', '/user').catch((err) => {
+          userPromise = null;
+          throw err;
+        });
+      }
+      return userPromise;
+    },
+
+    /** Orgs the auth user belongs to (needs read:org for private memberships). */
+    async listMyOrgs({ per_page = 100 } = {}) {
+      return request('GET', `/user/orgs?per_page=${per_page}`);
+    },
+
+    async getRepo({ owner, repo } = {}) {
+      return request('GET', repoPath(owner, repo));
+    },
+
+    /**
+     * File or directory contents at a ref (default branch when ref is omitted).
+     * @param {{ owner: string, repo: string, path?: string, ref?: string }} opts
+     */
+    async getContent({ owner, repo, path = '', ref } = {}) {
+      const cleaned = String(path || '')
+        .replace(/^\/+/, '')
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/');
+      const qs = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+      return request('GET', `${repoPath(owner, repo)}/contents/${cleaned}${qs}`);
+    },
+
+    /** README at a ref (default branch when ref is omitted). */
+    async getReadme({ owner, repo, ref } = {}) {
+      const qs = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+      return request('GET', `${repoPath(owner, repo)}/readme${qs}`);
+    },
+
+    async listPullReviews({ owner, repo, number, per_page = 50 } = {}) {
+      return request(
+        'GET',
+        `${repoPath(owner, repo)}/pulls/${encodeURIComponent(number)}/reviews?per_page=${per_page}`
+      );
+    },
+
+    /** Issue or PR conversation comments (not inline review comments). */
+    async listIssueComments({ owner, repo, number, per_page = 30 } = {}) {
+      return request(
+        'GET',
+        `${repoPath(owner, repo)}/issues/${encodeURIComponent(number)}/comments?per_page=${per_page}`
+      );
+    },
+
+    async getIssue({ owner, repo, number } = {}) {
+      return request('GET', `${repoPath(owner, repo)}/issues/${encodeURIComponent(number)}`);
+    },
+
+    /** Comment on an issue or PR conversation. */
+    async createIssueComment({ owner, repo, number, body } = {}) {
+      return request('POST', `${repoPath(owner, repo)}/issues/${encodeURIComponent(number)}/comments`, {
+        body: String(body || ''),
+      });
+    },
+
+    /**
+     * @param {{ owner: string, repo: string, title: string, body?: string, labels?: string[], assignees?: string[] }} opts
+     */
+    async createIssue({ owner, repo, title, body, labels, assignees } = {}) {
+      const payload = { title: String(title || '') };
+      if (body) payload.body = String(body);
+      if (labels?.length) payload.labels = labels;
+      if (assignees?.length) payload.assignees = assignees;
+      return request('POST', `${repoPath(owner, repo)}/issues`, payload);
     },
 
     /**
@@ -674,6 +722,7 @@ function createGithubClient(overrides = {}) {
 
 module.exports = {
   createGithubClient,
+  isGithubConfigured,
   GithubError,
   parseRepo,
   parseGithubUrl,

@@ -211,6 +211,22 @@ registry.register({
 
   intent: (text, ctx = {}) => releaseIntentFromContext(text, ctx),
 
+  mutatingTools: ['wf_release_execute_pending'],
+
+  selectTools: (intent, ctx) => {
+    if (intent.domain !== 'release') return [];
+    const names = [
+      'wf_release_start',
+      'wf_release_draft',
+      'wf_release_revise_draft',
+      'wf_release_approve_draft',
+      'wf_release_status',
+      'wf_release_advance',
+    ];
+    if (ctx.writes) names.push('wf_release_execute_pending');
+    return names;
+  },
+
   tools: [
     {
       type: 'function',

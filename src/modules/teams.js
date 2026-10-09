@@ -76,6 +76,11 @@ registry.register({
     };
   },
 
+  selectTools: (intent, ctx) =>
+    intent.domain === 'teams' || intent.domain === 'mixed' || ctx.fallback
+      ? ['teams_open', 'teams_list_chats', 'teams_read_messages']
+      : [],
+
   tools: [
     {
       type: 'function',

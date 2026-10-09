@@ -14,5 +14,6 @@ require('./jira');
 require('./github');
 require('./browser');
 require('./teams');
+require('./pending');
 
 module.exports = registry;

@@ -18,6 +18,14 @@ registry.register({
     }
   },
 
+  selectTools: (intent) => {
+    const names = ['memory_read', 'context_list', 'context_read'];
+    if (intent.domain === 'memory' || intent.domain === 'mixed' || intent.domain === 'meta') {
+      names.push('memory_append', 'memory_write');
+    }
+    return names;
+  },
+
   tools: [
     {
       type: 'function',

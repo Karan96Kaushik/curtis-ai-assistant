@@ -1,4 +1,5 @@
 const { createJiraClient, JiraError, browseUrl, adfToPlainText } = require('../integrations/jiraClient');
+const { prsForJiraKey } = require('../integrations/crossLink');
 
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/i;
 
@@ -8,10 +9,19 @@ function normalizeIssueKey(raw) {
   return s;
 }
 
+function summarizeLinked(issue) {
+  if (!issue) return null;
+  return {
+    key: issue.key,
+    summary: issue.fields?.summary || null,
+    status: issue.fields?.status?.name || null,
+  };
+}
+
 /**
  * Fetch a single Jira issue by exact key via GET /rest/api/3/issue/{key}.
  * Never uses fuzzy text search.
- * @param {{ issue: string, include_comments?: boolean|string|number, max_comments?: number|string }} payload
+ * @param {{ issue: string, include_comments?: boolean|string|number, max_comments?: number|string, include_github?: boolean }} payload
  */
 async function jiraGetIssueTask(payload = {}) {
   const issueKey = normalizeIssueKey(payload.issue || payload.key || payload.issueKey);
@@ -49,6 +59,11 @@ async function jiraGetIssueTask(payload = {}) {
         'labels',
         'components',
         'project',
+        'parent',
+        'subtasks',
+        'issuelinks',
+        'fixVersions',
+        'duedate',
       ],
     });
   } catch (err) {
@@ -87,23 +102,44 @@ async function jiraGetIssueTask(payload = {}) {
     components: Array.isArray(f.components) ? f.components.map((c) => c.name).filter(Boolean) : [],
     created: f.created || null,
     updated: f.updated || null,
+    dueDate: f.duedate || null,
+    fixVersions: Array.isArray(f.fixVersions) ? f.fixVersions.map((v) => v.name).filter(Boolean) : [],
+    parent: summarizeLinked(f.parent),
+    subtasks: (f.subtasks || []).map(summarizeLinked),
+    links: (f.issuelinks || [])
+      .map((l) => {
+        const other = l.outwardIssue || l.inwardIssue;
+        if (!other) return null;
+        return {
+          relation: l.outwardIssue ? l.type?.outward : l.type?.inward,
+          ...summarizeLinked(other),
+        };
+      })
+      .filter(Boolean),
     description,
     comments: [],
+    pulls: [],
   };
 
-  if (includeComments && maxComments > 0) {
-    try {
-      const { comments } = await jira.getComments(key, { maxResults: maxComments, orderBy: '-created' });
-      result.comments = (comments || []).map((c) => ({
-        id: c.id,
-        author: c.author?.displayName || '?',
-        created: c.created,
-        body: adfToPlainText(c.body).trim().slice(0, 1500),
-      }));
-    } catch (err) {
-      result.commentsWarning = String(err.message || err);
-    }
+  const includeGithub = payload.include_github !== false && payload.include_github !== 'false';
+  const [comments, pulls] = await Promise.all([
+    includeComments && maxComments > 0
+      ? jira.getComments(key, { maxResults: maxComments, orderBy: '-created' }).catch((err) => {
+          result.commentsWarning = String(err.message || err);
+          return null;
+        })
+      : null,
+    includeGithub ? prsForJiraKey(key) : [],
+  ]);
+  if (comments) {
+    result.comments = (comments.comments || []).map((c) => ({
+      id: c.id,
+      author: c.author?.displayName || '?',
+      created: c.created,
+      body: adfToPlainText(c.body).trim().slice(0, 1500),
+    }));
   }
+  result.pulls = pulls;
 
   return result;
 }
@@ -129,8 +165,27 @@ function formatResult(result) {
   if (result.resolution) lines.push(`Resolution: ${result.resolution}`);
   if (result.labels?.length) lines.push(`Labels: ${result.labels.join(', ')}`);
   if (result.components?.length) lines.push(`Components: ${result.components.join(', ')}`);
+  if (result.fixVersions?.length) lines.push(`Fix versions: ${result.fixVersions.join(', ')}`);
+  if (result.dueDate) lines.push(`Due: ${result.dueDate}`);
   if (result.created) lines.push(`Created: ${result.created}`);
   if (result.updated) lines.push(`Updated: ${result.updated}`);
+  if (result.parent) lines.push(`Parent: ${result.parent.key} — ${result.parent.summary || '?'} [${result.parent.status || '?'}]`);
+  if (result.subtasks?.length) {
+    lines.push(`Subtasks (${result.subtasks.length}):`);
+    for (const s of result.subtasks.slice(0, 15)) lines.push(`- ${s.key} — ${s.summary || '?'} [${s.status || '?'}]`);
+  }
+  if (result.links?.length) {
+    lines.push('Linked issues:');
+    for (const l of result.links.slice(0, 15)) {
+      lines.push(`- ${l.relation || 'relates to'} ${l.key} — ${l.summary || '?'} [${l.status || '?'}]`);
+    }
+  }
+  if (result.pulls?.length) {
+    lines.push('GitHub PRs mentioning this issue:');
+    for (const p of result.pulls) {
+      lines.push(`- ${p.repo || '?'}#${p.number} — ${p.title} [${p.state}] ${p.html_url}`);
+    }
+  }
   lines.push('', 'Description:', result.description.slice(0, 3500));
 
   if (result.comments?.length) {

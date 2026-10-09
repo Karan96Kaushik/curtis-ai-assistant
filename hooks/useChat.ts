@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { toast } from 'sonner';
 import { useConversations } from '@/hooks/useConversations';
 import { sendChatMessage } from '@/lib/amplify/chat-functions';
+import { restoreComposerDraft } from '@/lib/chat/composerDraft';
 import type { PendingAction } from '@/lib/chat/pending';
 import { parsePendingAction } from '@/lib/chat/pending';
 import { createConversation, deleteConversation, getConversationPending, requestCancel } from '@/lib/supabase/conversations';
@@ -130,15 +131,21 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         touch(res.conversation);
 
         const stillHere = currentId.current === targetId;
-        if (!stillHere) return true;
-
         if (res.cancelled || !res.reply) {
-          setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage]);
+          if (stillHere) {
+            setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage]);
+          }
           return true;
         }
 
-        setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage, res.reply!]);
-        setPending(parsePendingAction(res.pending));
+        if (stillHere) {
+          setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage, res.reply!]);
+          setPending(parsePendingAction(res.pending));
+        }
+        if (res.reply.role === 'error') {
+          restoreComposerDraft(targetId, message);
+          return false;
+        }
         return true;
       } catch (err) {
         if (controller.signal.aborted || isAbortError(err)) {
@@ -151,6 +158,7 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
           return true;
         }
         setMessages((rows) => rows.filter((m) => m.id !== optimistic.id));
+        restoreComposerDraft(targetId, message);
         toast.error(err instanceof Error ? err.message : String(err));
         return false;
       } finally {

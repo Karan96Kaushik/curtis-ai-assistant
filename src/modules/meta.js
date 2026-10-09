@@ -29,6 +29,8 @@ registry.register({
     }
   },
 
+  selectTools: () => ['clear_context', 'clear_chat', 'think'],
+
   tools: [
     {
       type: 'function',

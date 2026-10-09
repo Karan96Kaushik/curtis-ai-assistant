@@ -73,6 +73,15 @@ registry.register({
     }
   },
 
+  selectTools: (intent, ctx) =>
+    intent.domain === 'web' ||
+    intent.mode === 'research' ||
+    intent.domain === 'mixed' ||
+    intent.forceWebFetch ||
+    ctx.fallback
+      ? ['web_search', 'web_fetch_page']
+      : [],
+
   tools: [
     {
       type: 'function',

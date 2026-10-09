@@ -3,11 +3,17 @@ import { ArrowUp } from 'lucide-react';
 import ModelPicker from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { subscribeComposerDraft, takeComposerDraft } from '@/lib/chat/composerDraft';
 import type { AgentModel } from '@/lib/chat/models';
 
 const MAX_CHARS = 4000;
 
+function keepTyping(current: string, restored: string): string {
+  return current.trim() ? current : restored;
+}
+
 export default function Composer({
+  conversationId,
   sending,
   disabled,
   onSend,
@@ -17,6 +23,7 @@ export default function Composer({
   onModelChange,
   autoFocusKey,
 }: {
+  conversationId: string | null;
   sending: boolean;
   disabled?: boolean;
   onSend(text: string): Promise<boolean>;
@@ -34,6 +41,17 @@ export default function Composer({
     ref.current?.focus();
   }, [autoFocusKey]);
 
+  useEffect(() => {
+    const pending = takeComposerDraft(conversationId);
+    if (pending) setValue((current) => keepTyping(current, pending));
+    return subscribeComposerDraft((id, text) => {
+      if (id !== conversationId) return;
+      takeComposerDraft(conversationId);
+      setValue((current) => keepTyping(current, text));
+      ref.current?.focus();
+    });
+  }, [conversationId]);
+
   const canSend = !sending && !disabled && value.trim().length > 0 && value.length <= MAX_CHARS;
 
   async function submit() {
@@ -41,7 +59,7 @@ export default function Composer({
     const text = value;
     setValue('');
     const ok = await onSend(text);
-    if (!ok) setValue(text);
+    if (!ok) setValue((current) => keepTyping(current, text));
     ref.current?.focus();
   }
 

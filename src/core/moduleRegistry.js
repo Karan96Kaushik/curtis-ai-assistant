@@ -90,6 +90,37 @@ class ModuleRegistry {
     return Array.from(this.tools.values());
   }
 
+  /**
+   * Union of tool names each module offers for this intent (`mod.selectTools`).
+   * @param {object} intent
+   * @param {{ confirmOn: boolean, hasPending: boolean, writes: boolean, fallback: boolean }} ctx
+   * @returns {Set<string>}
+   */
+  selectTools(intent, ctx) {
+    const out = new Set();
+    for (const mod of this.modules.values()) {
+      if (typeof mod.selectTools !== 'function') continue;
+      for (const name of mod.selectTools(intent, ctx) || []) out.add(name);
+    }
+    return out;
+  }
+
+  /** Tool names that change external state (`mod.mutatingTools`). */
+  getMutatingTools() {
+    const out = new Set();
+    for (const mod of this.modules.values()) {
+      for (const name of mod.mutatingTools || []) out.add(name);
+    }
+    return out;
+  }
+
+  isMutatingTool(name) {
+    for (const mod of this.modules.values()) {
+      if ((mod.mutatingTools || []).includes(name)) return true;
+    }
+    return false;
+  }
+
   getToolSchema(name) {
     return this.tools.get(name);
   }

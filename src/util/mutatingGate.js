@@ -50,19 +50,14 @@ async function stageOrExecute(name, args, discordCtx, executeFn, opts = {}) {
 }
 
 /**
- * Execute a confirmed pending tool via the module registry.
- * Jira tools may pass a local executor map; others go through registry handlers.
+ * Execute a confirmed pending tool via its registry handler (with __confirmed set,
+ * so stageOrExecute runs it instead of staging again).
  * @param {{ tool: string, args: object, summary: string }} pending
  * @param {{ channelId?: string, userId?: string, _turnId?: string }} discordCtx
- * @param {{ jiraExecutors?: Record<string, (args: object) => Promise<{ text: string, envelope: object }>} }} [opts]
  */
-async function runConfirmedPending(pending, discordCtx, opts = {}) {
+async function runConfirmedPending(pending, discordCtx) {
   const name = pending.tool;
   const args = { ...(pending.args || {}), __confirmed: true };
-
-  if (opts.jiraExecutors && opts.jiraExecutors[name]) {
-    return opts.jiraExecutors[name](pending.args);
-  }
 
   const registry = require('../core/moduleRegistry');
   const handler = registry.getToolHandler(name);

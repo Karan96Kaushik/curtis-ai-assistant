@@ -5,6 +5,7 @@ import { Check, Copy, TriangleAlert } from 'lucide-react';
 import { BrandMark } from '@/components/layout/BrandMark';
 import { Button } from '@/components/ui/button';
 import type { DisplayMessage } from '@/hooks/useChat';
+import { formatResponseDuration } from '@/lib/chat/duration';
 import { cn } from '@/lib/utils';
 
 function CopyButton({ text }: { text: string }) {
@@ -26,7 +27,12 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function MessageBubble({ message }: { message: DisplayMessage }) {
+function Duration({ ms }: { ms: number | null }) {
+  if (ms == null) return null;
+  return <p className="mt-1 text-xs text-muted-foreground">Took {formatResponseDuration(ms)}</p>;
+}
+
+function MessageBubble({ message, durationMs }: { message: DisplayMessage; durationMs: number | null }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -46,9 +52,12 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
     return (
       <div className="flex gap-3">
         <BrandMark className="mt-0.5 shrink-0" />
-        <div className="flex max-w-[85%] items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <p className="whitespace-pre-wrap">{message.content}</p>
+        <div className="min-w-0 max-w-[85%]">
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          </div>
+          <Duration ms={durationMs} />
         </div>
       </div>
     );
@@ -68,6 +77,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
             {message.content}
           </Markdown>
         </div>
+        <Duration ms={durationMs} />
         <div className="mt-1 opacity-0 transition-opacity group-hover/msg:opacity-100 max-md:opacity-100">
           <CopyButton text={message.content} />
         </div>

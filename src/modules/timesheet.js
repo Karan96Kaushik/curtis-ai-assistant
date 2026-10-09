@@ -29,6 +29,9 @@ registry.register({
     };
   },
 
+  selectTools: (intent, ctx) =>
+    intent.domain === 'timesheet' || intent.forceTimesheet || ctx.fallback ? ['timesheet_draft'] : [],
+
   tools: [
     {
       type: 'function',

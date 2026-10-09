@@ -17,6 +17,11 @@ registry.register({
       };
     }
   },
+  selectTools: (intent, ctx) =>
+    intent.domain === 'scheduler' || ctx.fallback
+      ? ['schedule_task', 'list_schedules', 'cancel_schedule']
+      : [],
+
   tools: [
     {
       type: 'function',

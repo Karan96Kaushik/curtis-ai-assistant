@@ -196,12 +196,13 @@ function resolutionLabel(resolution) {
 
 function formatResult(result) {
   const p = result.connection?.profile || {};
-  const connLines = [
+  // Connection details only help diagnose an empty result; otherwise they are token noise.
+  const diagnosticLines = [
     `Jira: ${result.connection?.baseUrl || '?'}`,
     `Auth email (.env): ${result.connection?.authEmail || '?'}`,
     `Connected as: ${p.displayName || '?'} <${p.emailAddress || 'no-email'}> (${p.accountId || 'no-accountId'})`,
-    `JQL: ${result.jql}`,
   ];
+  const jqlLine = `JQL: ${result.jql}`;
 
   const filters = [];
   const res = result.resolution || 'unresolved';
@@ -221,7 +222,8 @@ function formatResult(result) {
 
   if (!result.issues.length) {
     return [
-      ...connLines,
+      ...diagnosticLines,
+      jqlLine,
       '',
       ...broadenLines,
       `No ${emptyNoun} assigned to this account${filterNote}.`,
@@ -236,7 +238,7 @@ function formatResult(result) {
     const url = issue.browseUrl ? ` ${issue.browseUrl}` : '';
     return `• ${issue.key} — ${issue.summary} [${typ}${issue.status}${pri}]${url}`;
   });
-  return [...connLines, '', ...broadenLines, header, ...lines].join('\n');
+  return [jqlLine, '', ...broadenLines, header, ...lines].join('\n');
 }
 
 module.exports = jiraMyIssuesTask;
