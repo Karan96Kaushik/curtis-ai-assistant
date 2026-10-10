@@ -28,8 +28,8 @@ export interface ProfileDraft {
   system_prompt: string;
   allowed_tools: string[];
   approval_required: string[];
-  model_chain: { provider: string; model: string }[];
-  allowed_providers: string[];
+  model_chain: { provider: ProviderName; model: string }[];
+  allowed_providers: ProviderName[];
   max_steps: number;
   max_runtime_min: number;
   token_budget: number;

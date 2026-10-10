@@ -246,13 +246,8 @@ export async function saveProfile(rt: AgentRuntime, userId: string, input: SaveP
     system_prompt: draft.system_prompt.trim(),
     allowed_tools: [...new Set(draft.allowed_tools)],
     approval_required: [...new Set(draft.approval_required)],
-    model_chain: draft.model_chain.flatMap((entry) => {
-      if (entry.provider !== 'groq' && entry.provider !== 'google' && entry.provider !== 'openrouter') return [];
-      return [{ provider: entry.provider, model: entry.model }];
-    }),
-    allowed_providers: draft.allowed_providers.flatMap((provider) =>
-      provider === 'groq' || provider === 'google' || provider === 'openrouter' ? [provider] : []
-    ),
+    model_chain: draft.model_chain,
+    allowed_providers: draft.allowed_providers,
     max_steps: draft.max_steps,
     max_runtime_min: draft.max_runtime_min,
     token_budget: draft.token_budget,
