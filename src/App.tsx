@@ -5,6 +5,7 @@ import LoginView from '@/components/auth/LoginView';
 import RequireAuth from '@/components/auth/RequireAuth';
 import ResetPasswordView from '@/components/auth/ResetPasswordView';
 import AgentsView from '@/components/agents/AgentsView';
+import ProfileEditorView from '@/components/agents/ProfileEditorView';
 import RunDetailView from '@/components/agents/RunDetailView';
 import ChatView from '@/components/chat/ChatView';
 import AppShell from '@/components/layout/AppShell';
@@ -32,6 +33,8 @@ export default function App() {
               <Route index element={<ChatView />} />
               <Route path="c/:conversationId" element={<ChatView />} />
               <Route path="agents" element={<AgentsView />} />
+              <Route path="agents/profiles/new" element={<ProfileEditorView />} />
+              <Route path="agents/profiles/:profileId" element={<ProfileEditorView />} />
               <Route path="agents/runs/:runId" element={<RunDetailView />} />
               <Route path="schedules" element={<SchedulesView />} />
               <Route path="settings" element={<SettingsView />} />

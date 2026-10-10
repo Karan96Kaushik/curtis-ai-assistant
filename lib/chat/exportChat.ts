@@ -1,5 +1,5 @@
 import { durationBeforeReply, formatResponseDuration } from '@/lib/chat/duration';
-import { splitModelSwitch } from '@/src/integrations/modelCatalog.js';
+import modelCatalog from '@/src/integrations/modelCatalog.js';
 
 export type ChatExportFormat = 'markdown' | 'json';
 
@@ -36,7 +36,7 @@ export function chatFileSlug(title: string): string {
 }
 
 function cleanMessage(content: string): { body: string; notice: string | null } {
-  return splitModelSwitch(content);
+  return modelCatalog.splitModelSwitch(content) as { body: string; notice: string | null };
 }
 
 export function buildChatExport(input: {

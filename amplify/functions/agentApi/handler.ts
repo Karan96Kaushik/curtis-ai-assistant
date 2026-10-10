@@ -1,5 +1,5 @@
 import { HttpError, json, parseBody, withHttp } from '../_shared/http.js';
-import { AgentInputError, answerRun, cancelRun, createRun, decideApproval, retryRun } from '../_shared/agent/runs.js';
+import { AgentInputError, answerRun, cancelRun, createRun, decideApproval, retryRun, saveProfile } from '../_shared/agent/runs.js';
 import { productionRuntime } from '../_shared/agent/runtime.js';
 import { requireAllowedCaller } from '../_shared/verifySupabaseAuth.js';
 
@@ -12,6 +12,15 @@ interface AgentRequest {
   decision?: string;
   edited_args?: unknown;
   note?: string;
+  name?: string;
+  description?: string | null;
+  system_prompt?: string;
+  allowed_tools?: unknown;
+  approval_required?: unknown;
+  model_ids?: unknown;
+  max_steps?: unknown;
+  max_runtime_min?: unknown;
+  token_budget?: unknown;
 }
 
 function asId(value: string | undefined): string {
@@ -45,6 +54,21 @@ export const handler = withHttp('agentApi', async (event) => {
     if (body.action === 'retry') {
       const run = await retryRun(rt, caller.userId, asId(body.id));
       return json(200, { id: run.id, status: run.status });
+    }
+    if (body.action === 'save_profile') {
+      const profile = await saveProfile(rt, caller.userId, {
+        id: body.id,
+        name: body.name,
+        description: body.description,
+        system_prompt: body.system_prompt,
+        allowed_tools: body.allowed_tools,
+        approval_required: body.approval_required,
+        model_ids: body.model_ids,
+        max_steps: body.max_steps,
+        max_runtime_min: body.max_runtime_min,
+        token_budget: body.token_budget,
+      });
+      return json(200, { id: profile.id, name: profile.name });
     }
     throw new HttpError(400, 'Unknown action');
   } catch (err) {

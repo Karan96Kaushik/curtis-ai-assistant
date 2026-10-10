@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Textarea } from '@/components/ui/textarea';
 import { agentApiConfigured } from '@/lib/amplify/client';
 import { createAgentRun } from '@/lib/amplify/agent-functions';
+import { agentModelLabel } from '@/lib/chat/models';
+import { DEFAULT_MODEL_IDS, modelIdsFromChain } from '@/lib/agents/modelChain';
 import { listAgentProfiles, listAgentRuns, snapshotName } from '@/lib/supabase/agentRuns';
 import type { AgentProfileRow, AgentRunRow, AgentRunStatus } from '@/lib/supabase/types';
 import { supabase } from '@/utils/supabase';
@@ -106,7 +108,9 @@ export default function AgentsView() {
     };
   }, [refresh]);
 
-  const selected = profiles.find((profile) => profile.id === profileId) ?? null;
+  const inbox = profiles.find((profile) => profile.is_system && profile.name === 'Inbox') ?? null;
+  const selected = profiles.find((profile) => profile.id === profileId) ?? inbox;
+  const chainIds = selected ? modelIdsFromChain(selected.model_chain) : [...DEFAULT_MODEL_IDS];
 
   async function launch() {
     const text = command.trim();
@@ -151,21 +155,31 @@ export default function AgentsView() {
             placeholder="Read my recent email and tell me what needs a reply."
             maxLength={4000}
           />
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted-foreground">Profile</span>
-            <select
-              className="h-9 rounded-md border bg-transparent px-3 text-sm"
-              value={profileId}
-              onChange={(event) => setProfileId(event.target.value)}
-            >
-              <option value="">Inbox (default)</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Profile</span>
+              <select
+                className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                value={profileId}
+                onChange={(event) => setProfileId(event.target.value)}
+              >
+                <option value="">Inbox (default)</option>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button asChild variant="outline">
+              <Link to="/agents/profiles/new">New profile</Link>
+            </Button>
+            {selected && (
+              <Button asChild variant="ghost">
+                <Link to={`/agents/profiles/${selected.id}`}>Edit</Link>
+              </Button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1">
             {(selected?.allowed_tools ?? ['email.list', 'email.get']).map((tool) => (
               <Badge key={tool} variant="outline">
@@ -176,6 +190,9 @@ export default function AgentsView() {
             <Badge variant="secondary">ask_user</Badge>
             <Badge variant="secondary">finish</Badge>
           </div>
+          {chainIds.length > 0 && (
+            <p className="text-xs text-muted-foreground">Models: {chainIds.map((id) => agentModelLabel(id)).join(' → ')}</p>
+          )}
           <Button onClick={() => void launch()} disabled={launching || !command.trim() || !agentApiConfigured}>
             {launching ? <Loader2 className="animate-spin" /> : null}
             Start agent

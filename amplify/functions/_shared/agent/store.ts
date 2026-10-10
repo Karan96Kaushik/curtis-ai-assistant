@@ -172,6 +172,7 @@ export interface AgentStore {
   addTokens(provider: string, source: string, tokens: number): Promise<void>;
   findInbox(userId: string): Promise<ProfileRecord | null>;
   insertProfile(profile: ProfileRecord): Promise<void>;
+  updateProfile(profile: ProfileRecord): Promise<boolean>;
   loadProfile(id: string, userId: string): Promise<ProfileRecord | null>;
 }
 
@@ -301,6 +302,31 @@ export class SupabaseAgentStore implements AgentStore {
   async insertProfile(profile: ProfileRecord): Promise<void> {
     const { error } = await this.db.from('agent_profiles').insert(profile);
     if (error) throw new Error(error.message);
+  }
+
+  async updateProfile(profile: ProfileRecord): Promise<boolean> {
+    const { data, error } = await this.db
+      .from('agent_profiles')
+      .update({
+        name: profile.name,
+        description: profile.description,
+        system_prompt: profile.system_prompt,
+        allowed_tools: profile.allowed_tools,
+        approval_required: profile.approval_required,
+        model_chain: profile.model_chain,
+        allowed_providers: profile.allowed_providers,
+        max_steps: profile.max_steps,
+        max_runtime_min: profile.max_runtime_min,
+        token_budget: profile.token_budget,
+        resource_scopes: profile.resource_scopes,
+        updated_at: profile.updated_at,
+      })
+      .eq('id', profile.id)
+      .eq('user_id', profile.user_id)
+      .select('id')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return Boolean(data);
   }
 
   async loadProfile(id: string, userId: string): Promise<ProfileRecord | null> {

@@ -88,6 +88,13 @@ export class MemoryAgentStore implements AgentStore {
     this.profiles.set(profile.id, clone(profile));
   }
 
+  async updateProfile(profile: import('./types.js').ProfileRecord): Promise<boolean> {
+    const current = this.profiles.get(profile.id);
+    if (!current || current.user_id !== profile.user_id) return false;
+    this.profiles.set(profile.id, clone({ ...profile, is_system: current.is_system }));
+    return true;
+  }
+
   async loadProfile(id: string, userId: string) {
     const profile = this.profiles.get(id);
     if (!profile || profile.user_id !== userId) return null;

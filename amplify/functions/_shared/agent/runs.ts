@@ -1,8 +1,9 @@
+import { chainFromModelIds, providersInChain } from '../../../../lib/agents/modelChain.js';
 import type { AgentRuntime } from './deps.js';
 import { executeTool } from './execute.js';
-import { inboxProfileDraft, outboundToolNames, snapshotFrom, validateProfile } from './profileRules.js';
+import { inboxProfileDraft, outboundToolNames, snapshotFrom, validateProfile, type ProfileDraft } from './profileRules.js';
 import { knownToolNames, registryToolName, TOOLS } from './registry.js';
-import { redactValue } from './text.js';
+import { redactValue, sanitizeToolError } from './text.js';
 import type { EventType, ProfileRecord, RunRecord, RunTrigger } from './types.js';
 
 export class AgentInputError extends Error {
@@ -148,7 +149,12 @@ export async function decideApproval(
     }
     const moved = await rt.store.transition(run.id, ['waiting_approval'], 'running', { pending_request: null });
     if (!moved) throw new AgentInputError('This run is not waiting for approval', 409);
-    const text = await executeTool(rt, moved, pending.tool_call_id, def, parsed.data as Record<string, unknown>);
+    let text: string;
+    try {
+      text = await executeTool(rt, moved, pending.tool_call_id, def, parsed.data as Record<string, unknown>);
+    } catch (err) {
+      text = sanitizeToolError(err);
+    }
     moved.messages = [...moved.messages, { role: 'tool', tool_call_id: pending.tool_call_id, content: text }];
     const saved = await rt.store.save(moved);
     if (!saved) throw new AgentInputError('This run changed before the action could be saved', 409);
@@ -179,6 +185,99 @@ export async function cancelRun(rt: AgentRuntime, userId: string, runId: string)
   if (!moved) throw new AgentInputError('This run has already finished', 409);
   await record(rt, run.id, 'cancelled', {});
   return moved;
+}
+
+export interface SaveProfileInput {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  system_prompt?: string;
+  allowed_tools?: unknown;
+  approval_required?: unknown;
+  model_ids?: unknown;
+  max_steps?: unknown;
+  max_runtime_min?: unknown;
+  token_budget?: unknown;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function wholeNumber(value: unknown, fallback: number): number {
+  if (value == null || value === '') return fallback;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(parsed) ? parsed : Number.NaN;
+}
+
+function profileRules() {
+  return { knownTools: knownToolNames(TOOLS), outbound: outboundToolNames(TOOLS) };
+}
+
+function draftFromInput(input: SaveProfileInput): ProfileDraft {
+  const { chain, unknown } = chainFromModelIds(stringList(input.model_ids));
+  if (unknown.length) throw new AgentInputError(`Unknown model: ${unknown.join(', ')}`);
+  if (!chain.length) throw new AgentInputError('Choose at least one model.');
+  const description = typeof input.description === 'string' ? input.description.trim() : '';
+  return {
+    name: typeof input.name === 'string' ? input.name : '',
+    description: description || null,
+    system_prompt: typeof input.system_prompt === 'string' ? input.system_prompt : '',
+    allowed_tools: stringList(input.allowed_tools),
+    approval_required: stringList(input.approval_required),
+    model_chain: chain,
+    allowed_providers: providersInChain(chain),
+    max_steps: wholeNumber(input.max_steps, 25),
+    max_runtime_min: wholeNumber(input.max_runtime_min, 60),
+    token_budget: wholeNumber(input.token_budget, 60000),
+    resource_scopes: {},
+  };
+}
+
+export async function saveProfile(rt: AgentRuntime, userId: string, input: SaveProfileInput): Promise<ProfileRecord> {
+  const draft = draftFromInput(input);
+  const errors = validateProfile(draft, profileRules());
+  if (errors.length) throw new AgentInputError(errors.join(' '));
+  const now = rt.now().toISOString();
+  const fields = {
+    name: draft.name.trim(),
+    description: draft.description,
+    system_prompt: draft.system_prompt.trim(),
+    allowed_tools: [...new Set(draft.allowed_tools)],
+    approval_required: [...new Set(draft.approval_required)],
+    model_chain: draft.model_chain.flatMap((entry) => {
+      if (entry.provider !== 'groq' && entry.provider !== 'google' && entry.provider !== 'openrouter') return [];
+      return [{ provider: entry.provider, model: entry.model }];
+    }),
+    allowed_providers: draft.allowed_providers.flatMap((provider) =>
+      provider === 'groq' || provider === 'google' || provider === 'openrouter' ? [provider] : []
+    ),
+    max_steps: draft.max_steps,
+    max_runtime_min: draft.max_runtime_min,
+    token_budget: draft.token_budget,
+    resource_scopes: draft.resource_scopes,
+  };
+
+  if (input.id) {
+    const existing = await rt.store.loadProfile(input.id, userId);
+    if (!existing) throw new AgentInputError('Profile not found', 404);
+    const next: ProfileRecord = { ...existing, ...fields, is_system: existing.is_system, updated_at: now };
+    const saved = await rt.store.updateProfile(next);
+    if (!saved) throw new AgentInputError('Profile not found', 404);
+    return next;
+  }
+
+  const profile: ProfileRecord = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    is_system: false,
+    created_at: now,
+    updated_at: now,
+    ...fields,
+  };
+  await rt.store.insertProfile(profile);
+  return profile;
 }
 
 export async function retryRun(rt: AgentRuntime, userId: string, runId: string): Promise<RunRecord> {

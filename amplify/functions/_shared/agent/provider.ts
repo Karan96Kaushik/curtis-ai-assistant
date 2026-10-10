@@ -1,3 +1,4 @@
+import { apiModelId } from '../../../../lib/agents/modelChain.js';
 import type { ChatMessage, ModelTool, ModelTurn, ProfileSnapshot, ProviderFallback, ProviderName } from './types.js';
 
 const ENDPOINTS: Record<ProviderName, { url: string; env: string }> = {
@@ -124,7 +125,7 @@ export async function callModelChain(opts: {
     }
 
     const body: Record<string, unknown> = {
-      model: current.model,
+      model: apiModelId(current.provider, current.model),
       messages: opts.messages,
       temperature: 0.2,
       tools: opts.tools,

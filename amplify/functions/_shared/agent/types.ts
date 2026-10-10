@@ -167,6 +167,8 @@ export interface ToolDef {
   description: string;
   schema: z.ZodType;
   maxResultChars: number;
+  /** Omitted tools are callable. False keeps a granted tool off the model until it is connected. */
+  available?: boolean;
   handler: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<{ text: string }>;
 }
 

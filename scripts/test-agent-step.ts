@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
+import { apiModelId, chainFromModelIds } from '../lib/agents/modelChain.js';
 import { buildContext, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
 import type { AgentRuntime } from '../amplify/functions/_shared/agent/deps.js';
 import { executeTool } from '../amplify/functions/_shared/agent/execute.js';
 import { eventsOf, MemoryAgentStore } from '../amplify/functions/_shared/agent/memoryStore.js';
 import { outboundToolNames, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
 import { knownToolNames, toModelTools, TOOLS } from '../amplify/functions/_shared/agent/registry.js';
-import { answerRun, decideApproval } from '../amplify/functions/_shared/agent/runs.js';
+import { answerRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
 import { handleStep } from '../amplify/functions/_shared/agent/step.js';
 import { capText, wrapUntrusted } from '../amplify/functions/_shared/agent/text.js';
 import type { EmailReader, EnqueueMessage, ModelTurn, ProfileSnapshot, RunRecord, ToolDef } from '../amplify/functions/_shared/agent/types.js';
@@ -329,11 +330,62 @@ describe('context and tool output', () => {
     assert.equal(toModelTools(TOOLS).some((tool) => tool.function.name === 'email__list'), true);
   });
 
+  it('keeps the selected model order and strips the OpenRouter prefix', () => {
+    const { chain, unknown } = chainFromModelIds(['gemini-3.5-flash-lite', 'openai/gpt-oss-20b', 'not-a-model']);
+    assert.deepEqual(
+      chain.map((entry) => entry.provider),
+      ['google', 'groq']
+    );
+    assert.deepEqual(unknown, ['not-a-model']);
+    assert.equal(apiModelId('openrouter', 'openrouter:nvidia/nemotron-3.5-lightning:free'), 'nvidia/nemotron-3.5-lightning:free');
+  });
+
   it('refuses a status change that the run has left', async () => {
     const store = new MemoryAgentStore();
     await store.insertRun(run({ status: 'done' }));
     const moved = await store.transition('run-1', ['running'], 'failed', { error: 'nope' });
     assert.equal(moved, null);
     assert.equal((await store.loadRun('run-1'))?.status, 'done');
+  });
+});
+
+describe('profiles', () => {
+  it('saves the model chain and rejects outbound mail without approval', async () => {
+    const store = new MemoryAgentStore();
+    const rt: AgentRuntime = {
+      store,
+      tools: [],
+      callModel: async () => {
+        throw new Error('unused');
+      },
+      enqueue: async () => undefined,
+      notify: async () => undefined,
+      email: { list: async () => [], get: async () => null },
+      now: () => NOW,
+    };
+    const saved = await saveProfile(rt, 'user-1', {
+      name: 'Dev',
+      system_prompt: 'Help with code.',
+      allowed_tools: ['github.read_file'],
+      approval_required: [],
+      model_ids: ['gemini-3.5-flash-lite', 'openai/gpt-oss-20b'],
+    });
+    assert.deepEqual(
+      saved.model_chain.map((entry) => entry.model),
+      ['gemini-3.5-flash-lite', 'openai/gpt-oss-20b']
+    );
+    assert.deepEqual(saved.allowed_providers, ['google', 'groq']);
+
+    await assert.rejects(
+      () =>
+        saveProfile(rt, 'user-1', {
+          name: 'Reply',
+          system_prompt: 'Reply to mail.',
+          allowed_tools: ['email.get', 'email.send'],
+          approval_required: [],
+          model_ids: ['openai/gpt-oss-20b'],
+        }),
+      /approval/
+    );
   });
 });

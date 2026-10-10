@@ -1,6 +1,12 @@
 import type { AgentEventRow, AgentProfileRow, AgentRunRow, Json } from '@/lib/supabase/types';
 import { supabase } from '@/utils/supabase';
 
+export async function getAgentProfile(id: string): Promise<AgentProfileRow | null> {
+  const { data, error } = await supabase.from('agent_profiles').select('*').eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function listAgentProfiles(): Promise<AgentProfileRow[]> {
   const { data, error } = await supabase.from('agent_profiles').select('*').order('name', { ascending: true });
   if (error) throw new Error(error.message);

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
+import { sendPushToUser } from '../fcm.js';
 import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
 import { capText, wrapUntrusted } from './text.js';
 
@@ -24,6 +26,15 @@ const emailList = z.object({
 
 const emailGet = z.object({
   id: z.string().min(1).max(40),
+});
+
+const pushSend = z.object({
+  title: z.string().min(1).max(120),
+  body: z.string().min(1).max(500),
+});
+
+const unavailableArgs = z.object({
+  input: z.string().max(500).optional(),
 });
 
 function parameters(schema: z.ZodType): Record<string, unknown> {
@@ -110,7 +121,36 @@ export const TOOLS: ToolDef[] = [
       return { text: `From: ${item.sender}\nSubject: ${item.subject}\n\n${body}` };
     },
   },
+  {
+    name: 'push.send',
+    integration: 'push',
+    access: 'write',
+    risk: 'low',
+    description: 'Send a push notification to yourself.',
+    schema: pushSend,
+    maxResultChars: 200,
+    handler: async (args, ctx) => {
+      const parsed = pushSend.parse(args);
+      const result = await sendPushToUser(ctx.userId, { title: parsed.title, body: parsed.body });
+      return { text: result.sent ? `Push sent to ${result.sent} device(s).` : 'No devices are registered for push.' };
+    },
+  },
 ];
+
+for (const tool of PERMISSION_TOOLS) {
+  if (TOOLS.some((existing) => existing.name === tool.name)) continue;
+  TOOLS.push({
+    name: tool.name,
+    integration: tool.integration,
+    access: tool.access,
+    risk: tool.risk,
+    description: tool.description,
+    schema: unavailableArgs,
+    maxResultChars: 300,
+    available: false,
+    handler: async () => ({ text: `${tool.name} is not connected yet.` }),
+  });
+}
 
 const BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
@@ -125,7 +165,9 @@ export function toolAllowed(profile: ProfileSnapshot, name: string): boolean {
 }
 
 export function toolsForProfile(profile: ProfileSnapshot, tools: ToolDef[] = TOOLS): ToolDef[] {
-  return tools.filter((tool) => CORE_TOOLS.has(tool.name) || profile.allowed_tools.includes(tool.name));
+  return tools.filter(
+    (tool) => tool.available !== false && (CORE_TOOLS.has(tool.name) || profile.allowed_tools.includes(tool.name))
+  );
 }
 
 export function toModelTools(tools: ToolDef[]): ModelTool[] {

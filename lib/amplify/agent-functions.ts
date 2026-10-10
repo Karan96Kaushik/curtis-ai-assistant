@@ -24,3 +24,32 @@ export async function cancelAgentRun(id: string): Promise<{ id: string; status: 
 export async function retryAgentRun(id: string): Promise<{ id: string; status: string }> {
   return callFunction('agentApi', { action: 'retry', id });
 }
+
+export interface SaveAgentProfileInput {
+  id?: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  allowedTools: string[];
+  approvalRequired: string[];
+  modelIds: string[];
+  maxSteps: number;
+  maxRuntimeMin: number;
+  tokenBudget: number;
+}
+
+export async function saveAgentProfile(input: SaveAgentProfileInput): Promise<{ id: string; name: string }> {
+  return callFunction('agentApi', {
+    action: 'save_profile',
+    id: input.id,
+    name: input.name,
+    description: input.description,
+    system_prompt: input.systemPrompt,
+    allowed_tools: input.allowedTools,
+    approval_required: input.approvalRequired,
+    model_ids: input.modelIds,
+    max_steps: input.maxSteps,
+    max_runtime_min: input.maxRuntimeMin,
+    token_budget: input.tokenBudget,
+  });
+}
