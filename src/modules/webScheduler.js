@@ -56,7 +56,7 @@ function register() {
               },
               cron: {
                 type: 'string',
-                description: `Cron expression in ${TZ} (e.g. "0 9 * * 1-5" = weekdays at 09:00).`,
+                description: `Cron expression in ${TZ} (e.g. "0 9 * * 1-5" = weekdays at 09:00). Runs must be at least 2 minutes apart.`,
               },
               prompt: {
                 type: 'string',

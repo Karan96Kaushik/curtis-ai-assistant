@@ -169,6 +169,8 @@ alter table public.scheduled_job_runs enable row level security;
 
 grant select, insert, update on public.scheduled_jobs to authenticated;
 grant select on public.scheduled_job_runs to authenticated;
+grant all on public.scheduled_jobs to service_role;
+grant all on public.scheduled_job_runs to service_role;
 
 create policy scheduled_jobs_owner_select on public.scheduled_jobs
   for select to authenticated

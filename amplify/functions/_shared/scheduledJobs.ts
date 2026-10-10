@@ -79,7 +79,13 @@ export function resolveWhen(input: ScheduleRequest, now = Date.now()): { runAt: 
 
   if (hasCron) {
     const cron = String(input.cron).trim();
-    return { runAt: nextCronRun(cron, new Date(now)), cron };
+    const from = new Date(now);
+    const runAt = nextCronRun(cron, from);
+    const following = nextCronRun(cron, new Date(new Date(runAt).getTime() + 1000));
+    if (new Date(following).getTime() - new Date(runAt).getTime() < 2 * 60_000) {
+      throw new Error('Cron must leave at least 2 minutes between runs');
+    }
+    return { runAt, cron };
   }
 
   let runAt: string;

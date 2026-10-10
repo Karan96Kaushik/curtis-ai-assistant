@@ -5,9 +5,9 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatUkTime } from '@/lib/schedules/format';
 import { cancelScheduledJob, listScheduledJobRuns, listScheduledJobs } from '@/lib/supabase/schedules';
 import type { ScheduledJobRow, ScheduledJobRunRow, ScheduledJobStatus } from '@/lib/supabase/types';
-import { formatUK } from '@/src/util/time.js';
 
 const ACTIVE: ScheduledJobStatus[] = ['pending', 'running'];
 
@@ -46,7 +46,7 @@ function JobCard({
         </div>
         <CardTitle className="text-base leading-snug font-medium whitespace-pre-wrap">{job.prompt}</CardTitle>
         <CardDescription>
-          {job.status === 'pending' || job.status === 'running' ? 'Next run' : 'Scheduled for'} {formatUK(job.run_at)}
+          {job.status === 'pending' || job.status === 'running' ? 'Next run' : 'Scheduled for'} {formatUkTime(job.run_at)}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -72,7 +72,7 @@ function JobCard({
                 <li key={run.id} className="rounded-md border px-3 py-2">
                   <p className="font-medium">
                     {run.status === 'succeeded' ? 'Succeeded' : run.status === 'failed' ? 'Failed' : 'Running'}
-                    <span className="ml-2 font-normal text-muted-foreground">{formatUK(run.started_at)}</span>
+                    <span className="ml-2 font-normal text-muted-foreground">{formatUkTime(run.started_at)}</span>
                   </p>
                   {run.error && <p className="mt-1 text-destructive">{run.error}</p>}
                   {run.reply && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-muted-foreground">{run.reply}</p>}
