@@ -48,5 +48,8 @@ export const chat = defineFunction({
     JIRA_API_TOKEN: secret('JIRA_API_TOKEN'),
     GITHUB_TOKEN: secret('GITHUB_TOKEN'),
     SERP_API_KEY: secret('SERP_API_KEY'),
+    FIREBASE_SDK_SA_KEY: secret('FIREBASE_SDK_SA_KEY'),
+    SUPABASE_SECRET_KEY_CURTIS: secret('SUPABASE_SECRET_KEY_CURTIS'),
   },
 });
+

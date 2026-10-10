@@ -152,6 +152,28 @@ export interface Database {
         };
         Relationships: [];
       };
+      device_tokens: {
+        Row: {
+          user_id: string;
+          token: string;
+          platform: 'android' | 'ios' | 'web';
+          device_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          token: string;
+          platform?: 'android' | 'ios' | 'web';
+          device_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          platform?: 'android' | 'ios' | 'web';
+          device_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };
@@ -168,3 +190,5 @@ export type MessageRow = Tables['messages']['Row'];
 export type ChatMessage = Pick<MessageRow, 'id' | 'conversation_id' | 'role' | 'content' | 'created_at'>;
 export type AgentFileRow = Tables['agent_files']['Row'];
 export type ContextRow = Tables['contexts']['Row'];
+export type DeviceTokenRow = Tables['device_tokens']['Row'];
+

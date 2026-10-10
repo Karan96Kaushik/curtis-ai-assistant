@@ -5,6 +5,9 @@ import conversationStoreModule from '../../../src/ai/conversationStore.js';
 import pendingActionsModule from '../../../src/ai/pendingActions.js';
 import registry from '../../../src/core/moduleRegistry.js';
 import phoneNotifications from '../../../src/ai/phoneNotifications.js';
+import pushNotificationsModule from '../../../src/ai/pushNotifications.js';
+import { sendPushToUser } from '../_shared/fcm.js';
+import { HttpError } from '../_shared/http.js';
 
 /** The slices of the JS stores used here, typed more precisely than their JSDoc. */
 interface ConversationStoreApi {
@@ -29,6 +32,25 @@ interface PendingActionsApi {
 
 const conversationStore = conversationStoreModule as unknown as ConversationStoreApi;
 const pendingActions = pendingActionsModule as unknown as PendingActionsApi;
+
+const pushNotifications = pushNotificationsModule as unknown as {
+  configure(
+    fn: (
+      userId: string,
+      payload: { title: string; body: string; data?: Record<string, string> }
+    ) => Promise<{ sent: number; failed: number; removed: number }>
+  ): void;
+};
+
+/** Agent push tool: service-role device_tokens lookup + FCM. No confirmation gate. */
+pushNotifications.configure(async (userId, payload) => {
+  try {
+    return await sendPushToUser(userId, payload);
+  } catch (err) {
+    if (err instanceof HttpError) throw new Error(err.message);
+    throw err;
+  }
+});
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge

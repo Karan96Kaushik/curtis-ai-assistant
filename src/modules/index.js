@@ -9,6 +9,7 @@ require('./meta');
 require('./schedulerModule');
 require('./memory');
 require('./phoneNotifications');
+require('./pushNotifications');
 require('./web');
 require('./release');
 require('./jira');

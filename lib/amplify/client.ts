@@ -1,9 +1,10 @@
 import outputs from '@/amplify_outputs.json';
 import { supabase } from '@/utils/supabase';
 
-export type FunctionKey = 'chat';
+export type FunctionKey = 'chat' | 'sendPush';
 
-const FUNCTION_KEYS: FunctionKey[] = ['chat'];
+const FUNCTION_KEYS: FunctionKey[] = ['chat', 'sendPush'];
+
 
 const custom = ((outputs as { custom?: Record<string, unknown> }).custom ?? {}) as Record<string, unknown>;
 

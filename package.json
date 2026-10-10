@@ -30,6 +30,9 @@
     "amplify:secret:jira": "npx ampx sandbox secret set JIRA_API_TOKEN",
     "amplify:secret:github": "npx ampx sandbox secret set GITHUB_TOKEN",
     "amplify:secret:serp": "npx ampx sandbox secret set SERP_API_KEY",
+    "amplify:secret:firebase": "npx ampx sandbox secret set FIREBASE_SDK_SA_KEY",
+    "amplify:secret:supabase": "npx ampx sandbox secret set SUPABASE_SECRET_KEY_CURTIS",
+
     "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
