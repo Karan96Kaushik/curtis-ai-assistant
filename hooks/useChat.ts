@@ -11,6 +11,7 @@ import { listMessages } from '@/lib/supabase/messages';
 import { listPhoneNotifications } from '@/lib/supabase/notifications';
 import type { PhoneNotificationContext } from '@/lib/supabase/notifications';
 import type { ChatMessage } from '@/lib/supabase/types';
+import { supabase } from '@/utils/supabase';
 
 export interface DisplayMessage extends ChatMessage {
   /** Optimistic row not yet confirmed by the server. */
@@ -40,8 +41,20 @@ function chatKey(conversationId: string | null): string {
   return conversationId ?? NEW_CHAT_KEY;
 }
 
+function mergeMessage(rows: DisplayMessage[], incoming: ChatMessage): DisplayMessage[] {
+  if (rows.some((message) => message.id === incoming.id)) return rows;
+  const withoutLocal = rows.filter(
+    (message) => !(message.local && message.role === incoming.role && message.content === incoming.content)
+  );
+  return [...withoutLocal, incoming].sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+function mergeMessages(rows: DisplayMessage[], incoming: ChatMessage[]): DisplayMessage[] {
+  return incoming.reduce(mergeMessage, rows);
+}
+
 export function useChat(conversationId: string | null, { onConversationCreated, modelRef }: UseChatOptions) {
-  const { touch } = useConversations();
+  const { touch, noteActivity } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [loading, setLoading] = useState(false);
@@ -92,6 +105,27 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
       active = false;
     };
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const channel = supabase
+      .channel(`messages-chat-${conversationId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+        (payload) => {
+          const row = payload.new as ChatMessage;
+          if (!row?.id || row.conversation_id !== conversationId) return;
+          setMessages((messages) => mergeMessage(messages, row));
+          setNotFound(false);
+          if (row.created_at) noteActivity(conversationId, row.created_at);
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId, noteActivity]);
 
   const cancel = useCallback(() => {
     const turn = turnRef.current;
@@ -173,13 +207,18 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         const stillHere = currentId.current === targetId;
         if (res.cancelled || !res.reply) {
           if (stillHere) {
-            setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage]);
+            setMessages((rows) => mergeMessages(rows.filter((m) => m.id !== optimistic.id), [res.userMessage]));
           }
           return true;
         }
 
         if (stillHere) {
-          setMessages((rows) => [...rows.filter((m) => m.id !== optimistic.id), res.userMessage, res.reply!]);
+          setMessages((rows) =>
+            mergeMessages(
+              rows.filter((m) => m.id !== optimistic.id),
+              [res.userMessage, res.reply!]
+            )
+          );
           setPending(parsePendingAction(res.pending));
         }
         if (res.reply.role === 'error') {

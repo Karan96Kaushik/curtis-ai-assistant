@@ -6,6 +6,7 @@ import RequireAuth from '@/components/auth/RequireAuth';
 import ResetPasswordView from '@/components/auth/ResetPasswordView';
 import ChatView from '@/components/chat/ChatView';
 import AppShell from '@/components/layout/AppShell';
+import SchedulesView from '@/components/schedules/SchedulesView';
 import SettingsView from '@/components/settings/SettingsView';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/hooks/useAuth';
@@ -28,6 +29,7 @@ export default function App() {
             >
               <Route index element={<ChatView />} />
               <Route path="c/:conversationId" element={<ChatView />} />
+              <Route path="schedules" element={<SchedulesView />} />
               <Route path="settings" element={<SettingsView />} />
               <Route path="*" element={<ChatView />} />
             </Route>

@@ -36,8 +36,11 @@ export function contextsTableMissing(error: { message?: string; code?: string })
   );
 }
 
-export async function loadContexts(db: SupabaseClient): Promise<{ enabled: boolean; rows: ContextRow[] }> {
-  const { data, error } = await db.from('contexts').select('slug, title, kind, content');
+export async function loadContexts(
+  db: SupabaseClient,
+  userId: string
+): Promise<{ enabled: boolean; rows: ContextRow[] }> {
+  const { data, error } = await db.from('contexts').select('slug, title, kind, content').eq('user_id', userId);
   if (error) {
     if (contextsTableMissing(error)) {
       console.warn('[chat] contexts table is missing. Run supabase/migrations/0002_contexts.sql');
@@ -131,7 +134,7 @@ export async function syncContextsFromTurn(
 
   const deleteSlugs = [...new Set(removed.map((filePath) => slugFromAgentPath(filePath)).filter((slug): slug is string => !!slug))];
   if (deleteSlugs.length) {
-    const { error } = await db.from('contexts').delete().in('slug', deleteSlugs);
+    const { error } = await db.from('contexts').delete().eq('user_id', userId).in('slug', deleteSlugs);
     if (error) throw error;
   }
 }

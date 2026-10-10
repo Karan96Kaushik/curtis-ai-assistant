@@ -1,11 +1,11 @@
 import { defineFunction } from '@aws-amplify/backend';
 import { agentFunctionEnvironment } from '../../agentFunctionEnv.js';
 
-export const chat = defineFunction({
-  name: 'chat',
+/** Runs one claimed schedule. Invoked asynchronously by scheduleTick. */
+export const runScheduledJob = defineFunction({
+  name: 'runScheduledJob',
   entry: './handler.ts',
   runtime: 22,
-  // Timesheet drafts sweep every GitHub branch for the month (~3-4 min).
   timeoutSeconds: 900,
   memoryMB: 1024,
   environment: agentFunctionEnvironment(),

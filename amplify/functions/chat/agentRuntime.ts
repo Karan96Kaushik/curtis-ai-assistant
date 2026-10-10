@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import discordAgent from '../../../src/ai/discordAgent.js';
 import conversationStoreModule from '../../../src/ai/conversationStore.js';
 import pendingActionsModule from '../../../src/ai/pendingActions.js';
@@ -8,6 +9,8 @@ import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 import pushNotificationsModule from '../../../src/ai/pushNotifications.js';
 import { sendPushToUser } from '../_shared/fcm.js';
 import { HttpError } from '../_shared/http.js';
+import { cancelScheduledJob, createScheduledJob, listScheduledJobs } from '../_shared/scheduledJobs.js';
+import webSchedulerModule from '../../../src/modules/webScheduler.js';
 
 /** The slices of the JS stores used here, typed more precisely than their JSDoc. */
 interface ConversationStoreApi {
@@ -54,11 +57,51 @@ pushNotifications.configure(async (userId, payload) => {
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge
- * (browser, teams) and the 30s cron loop that posts to Discord (scheduler).
+ * (browser, teams) and the Discord scheduler (local JSON file + DMs).
+ * The web scheduler is registered in its place and stores jobs in Supabase.
  */
 const LOCAL_ONLY_MODULES = ['browser', 'teams', 'scheduler'];
 
 for (const id of LOCAL_ONLY_MODULES) registry.unregister(id);
+
+interface ActiveSchedule {
+  db: SupabaseClient;
+  userId: string;
+  conversationId: string;
+  model: string;
+}
+
+let activeScheduling: ActiveSchedule | null = null;
+
+const webScheduler = webSchedulerModule as {
+  register(): void;
+  bind(api: {
+    schedule(input: { runInMinutes?: unknown; runAt?: unknown; cron?: unknown; prompt?: unknown }): Promise<unknown>;
+    list(): Promise<unknown>;
+    cancel(jobId: string): Promise<boolean>;
+  }): void;
+};
+
+if (process.env.CURTIS_SURFACE === 'web') {
+  webScheduler.register();
+  webScheduler.bind({
+    schedule(input) {
+      if (!activeScheduling) throw new Error('Scheduling is not available in this session.');
+      return createScheduledJob(activeScheduling.db, activeScheduling.userId, activeScheduling.conversationId, {
+        ...input,
+        model: activeScheduling.model,
+      });
+    },
+    list() {
+      if (!activeScheduling) throw new Error('Scheduling is not available in this session.');
+      return listScheduledJobs(activeScheduling.db, activeScheduling.userId);
+    },
+    cancel(jobId) {
+      if (!activeScheduling) throw new Error('Scheduling is not available in this session.');
+      return cancelScheduledJob(activeScheduling.db, activeScheduling.userId, jobId);
+    },
+  });
+}
 
 // There is no Discord channel to purge on the web; "clear the chat" resets agent memory.
 const clearContext = registry.getToolHandler('clear_context');
@@ -177,6 +220,7 @@ export async function runAgentTurn({
   text,
   snapshot,
   phoneNotifications: phoneContext = null,
+  scheduling = null,
 }: {
   conversationId: string;
   user: AgentUser;
@@ -184,6 +228,8 @@ export async function runAgentTurn({
   snapshot: AgentSnapshot;
   /** Sanitized notification window for this turn. Null unless the user just confirmed a share. */
   phoneNotifications?: unknown;
+  /** Present on web turns so schedule_task can write the caller's jobs. */
+  scheduling?: { db: SupabaseClient; model: string } | null;
 }): Promise<TurnResult> {
   const channelId = conversationId;
   const userId = user.id;
@@ -198,6 +244,9 @@ export async function runAgentTurn({
 
   resetMemory(channelId, userId);
   phone.setTurnContext(phoneContext);
+  if (scheduling) {
+    activeScheduling = { db: scheduling.db, userId, conversationId, model: scheduling.model };
+  }
   try {
     for (const msg of snapshot.history) {
       conversationStore.appendMessage(channelId, userId, msg.role, msg.content, session);
@@ -247,6 +296,7 @@ export async function runAgentTurn({
       removedPaths: [...before.keys()].filter((p) => !nowPaths.has(p)),
     };
   } finally {
+    activeScheduling = null;
     phone.clearTurnContext();
     resetMemory(channelId, userId);
     await fs.rm(stateDir(), { recursive: true, force: true });

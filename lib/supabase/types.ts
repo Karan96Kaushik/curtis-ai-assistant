@@ -2,6 +2,10 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type MessageRole = 'user' | 'assistant' | 'error';
 
+export type ScheduledJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type ScheduledJobRunStatus = 'running' | 'succeeded' | 'failed';
+
 export interface Database {
   public: {
     Tables: {
@@ -152,6 +156,71 @@ export interface Database {
         };
         Relationships: [];
       };
+      scheduled_jobs: {
+        Row: {
+          id: string;
+          user_id: string;
+          conversation_id: string;
+          prompt: string;
+          run_at: string;
+          cron: string | null;
+          timezone: string;
+          model: string | null;
+          status: ScheduledJobStatus;
+          last_error: string | null;
+          locked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          conversation_id: string;
+          prompt: string;
+          run_at: string;
+          cron?: string | null;
+          timezone?: string;
+          model?: string | null;
+          status?: ScheduledJobStatus;
+          last_error?: string | null;
+          locked_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: 'cancelled';
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      scheduled_job_runs: {
+        Row: {
+          id: string;
+          job_id: string;
+          user_id: string;
+          status: ScheduledJobRunStatus;
+          started_at: string;
+          finished_at: string | null;
+          reply: string | null;
+          error: string | null;
+          push_sent: number;
+          push_failed: number;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          user_id: string;
+          status: ScheduledJobRunStatus;
+          started_at?: string;
+          finished_at?: string | null;
+          reply?: string | null;
+          error?: string | null;
+          push_sent?: number;
+          push_failed?: number;
+        };
+        Update: never;
+        Relationships: [];
+      };
       device_tokens: {
         Row: {
           user_id: string;
@@ -191,4 +260,6 @@ export type ChatMessage = Pick<MessageRow, 'id' | 'conversation_id' | 'role' | '
 export type AgentFileRow = Tables['agent_files']['Row'];
 export type ContextRow = Tables['contexts']['Row'];
 export type DeviceTokenRow = Tables['device_tokens']['Row'];
+export type ScheduledJobRow = Tables['scheduled_jobs']['Row'];
+export type ScheduledJobRunRow = Tables['scheduled_job_runs']['Row'];
 

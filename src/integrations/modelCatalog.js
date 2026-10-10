@@ -1,6 +1,8 @@
 /**
  * Fallback order for a router. The user's model is always tried first;
- * the rest of its router follows. Keep labels aligned with lib/chat/models.ts.
+ * the rest of that router's fallback list follows. Extra models are selectable
+ * and labeled here, but left out of the automatic chain. Keep labels aligned
+ * with lib/chat/models.ts.
  */
 
 const MARKER = '\n\n%%model-switch%%\n';
@@ -11,19 +13,37 @@ const GROQ = [
   { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', router: 'Groq' },
 ];
 
+/** Still on Groq, but enterprise-only. Selectable; not used as automatic fallbacks. */
+const GROQ_EXTRA = [
+  { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', router: 'Groq' },
+  { id: 'minimaxai/minimax-m2.7', label: 'MiniMax M2.7', router: 'Groq' },
+  { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B', router: 'Groq' },
+];
+
 const GOOGLE = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', router: 'AI Studio' },
   { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', router: 'AI Studio' },
+  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', router: 'AI Studio' },
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', router: 'AI Studio' },
+  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', router: 'AI Studio' },
 ];
 
 const OPENROUTER = [
   { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra', router: 'OpenRouter' },
+  { id: 'openrouter:thinkingmachines/inkling:free', label: 'Inkling', router: 'OpenRouter' },
   { id: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super', router: 'OpenRouter' },
   { id: 'openrouter:nvidia/nemotron-3.5-lightning:free', label: 'Nemotron 3.5 Lightning', router: 'OpenRouter' },
 ];
 
-const ALL = [...GROQ, ...GOOGLE, ...OPENROUTER];
+/** Free specialists. Selectable; omitted from fallback so one error does not spend the daily free quota. */
+const OPENROUTER_EXTRA = [
+  { id: 'openrouter:thinkingmachines/inkling-small:free', label: 'Inkling Small', router: 'OpenRouter' },
+  { id: 'openrouter:google/gemma-4-31b-it:free', label: 'Gemma 4 31B', router: 'OpenRouter' },
+  { id: 'openrouter:qwen/qwen3.8-27b:free', label: 'Qwen 3.8 27B', router: 'OpenRouter' },
+  { id: 'openrouter:google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B', router: 'OpenRouter' },
+];
+
+const ALL = [...GROQ, ...GROQ_EXTRA, ...GOOGLE, ...OPENROUTER, ...OPENROUTER_EXTRA];
 
 function isGoogleModel(modelId) {
   return String(modelId || '').startsWith('gemini-');
