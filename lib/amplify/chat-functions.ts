@@ -1,7 +1,6 @@
 import { callFunction } from './client';
 import type { ChatMessage, ConversationSummary } from '@/lib/supabase/types';
 import type { PendingAction } from '@/lib/chat/pending';
-import type { PhoneNotificationContext } from '@/lib/supabase/notifications';
 
 export interface SendChatRequest {
   /** Omit to start a new conversation. */
@@ -11,8 +10,6 @@ export interface SendChatRequest {
   model?: string;
   /** Id the Stop button uses to cancel this turn. */
   turnId?: string;
-  /** Present only when the user just confirmed a phone-notification request. */
-  phoneNotifications?: PhoneNotificationContext;
 }
 
 export interface SendChatResponse {

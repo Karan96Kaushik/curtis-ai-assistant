@@ -5,11 +5,8 @@ import { sendChatMessage } from '@/lib/amplify/chat-functions';
 import { restoreComposerDraft } from '@/lib/chat/composerDraft';
 import type { PendingAction } from '@/lib/chat/pending';
 import { parsePendingAction } from '@/lib/chat/pending';
-import { isConfirmation, TOOL_NAME as PHONE_NOTIFICATIONS_TOOL } from '@/src/ai/phoneNotifications.js';
 import { createConversation, deleteConversation, getConversationPending, requestCancel } from '@/lib/supabase/conversations';
 import { listMessages } from '@/lib/supabase/messages';
-import { listPhoneNotifications } from '@/lib/supabase/notifications';
-import type { PhoneNotificationContext } from '@/lib/supabase/notifications';
 import type { ChatMessage } from '@/lib/supabase/types';
 import { supabase } from '@/utils/supabase';
 
@@ -164,21 +161,6 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
 
       let targetId = conversationId;
       try {
-        let phoneNotifications: PhoneNotificationContext | undefined;
-        if (pending?.tool === PHONE_NOTIFICATIONS_TOOL && isConfirmation(message)) {
-          if (!pending.durationMinutes) {
-            toast.error('This notification request has no time window. Ask Curtis to try again.');
-            return false;
-          }
-          try {
-            phoneNotifications = await listPhoneNotifications(pending.durationMinutes, controller.signal);
-          } catch (err) {
-            if (controller.signal.aborted || isAbortError(err)) return true;
-            toast.error(err instanceof Error ? err.message : 'Could not read phone notifications.');
-            return false;
-          }
-        }
-
         setMessages((rows) => [...rows, optimistic]);
 
         if (!targetId) {
@@ -198,7 +180,7 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
 
         turnRef.current = { conversationId: targetId, turnId };
         const res = await sendChatMessage(
-          { conversationId: targetId, message, model: modelRef.current, turnId, phoneNotifications },
+          { conversationId: targetId, message, model: modelRef.current, turnId },
           controller.signal
         );
         if (controller.signal.aborted) return true;
@@ -250,7 +232,7 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         }
       }
     },
-    [conversationId, pending, touch, onConversationCreated, modelRef]
+    [conversationId, touch, onConversationCreated, modelRef]
   );
 
   return { messages, pending, loading, sending, notFound, send, cancel };

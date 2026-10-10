@@ -1,5 +1,4 @@
 const registry = require('../core/moduleRegistry');
-const pendingActions = require('../ai/pendingActions');
 const phone = require('../ai/phoneNotifications');
 
 function isWeb() {
@@ -19,7 +18,7 @@ function notAvailable() {
   };
 }
 
-function durationError(message) {
+function readError(message) {
   return {
     text: `Error: ${message}`,
     envelope: {
@@ -27,7 +26,7 @@ function durationError(message) {
       source: 'phone-notifications',
       confidence: 'high',
       data: null,
-      error: 'duration',
+      error: 'read_failed',
     },
   };
 }
@@ -46,7 +45,7 @@ registry.register({
     return {
       domain: 'phone',
       mode: 'lookup',
-      needsConfirm: true,
+      needsConfirm: false,
       budget: 'fast',
       confidence: 'high',
       reason: 'phone-notifications',
@@ -55,18 +54,16 @@ registry.register({
 
   selectTools: () => (isWeb() ? [phone.TOOL_NAME] : []),
 
-  mutatingTools: [phone.TOOL_NAME],
-
   tools: [
     {
       type: 'function',
       function: {
         name: phone.TOOL_NAME,
         description:
-          'Ask to read the user\'s own phone notifications for a limited recent window. ' +
+          'Read the signed-in user\'s own phone notifications for a limited recent window. ' +
           'Covers private device notifications: email, promotions, one-time codes, and personal messages. ' +
           `duration_minutes is required and must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES} (24 hours). ` +
-          'Longer durations are rejected. Nothing is read until the user confirms on a later message. ' +
+          'The read runs immediately on the server. Do not ask the user to confirm. ' +
           'Call this only when the user asked about notifications on their phone, and pick the shortest window that answers them.',
         parameters: {
           type: 'object',
@@ -88,88 +85,24 @@ registry.register({
     [phone.TOOL_NAME]: async (args, discordCtx) => {
       if (!isWeb()) return notAvailable();
 
-      const shared = phone.peekTurnContext();
-      if (shared) {
-        const loaded = phone.bindConfirmedContext({ duration_minutes: shared.durationMinutes }, shared);
-        if (loaded.ok) {
-          return {
-            text: [
-              `Phone notifications for the last ${loaded.context.durationMinutes} minutes are already loaded (${loaded.context.items.length}).`,
-              'Answer from the PHONE NOTIFICATIONS context in this turn.',
-              'Do not ask the user to confirm again.',
-            ].join(' '),
-            envelope: {
-              ok: true,
-              source: 'phone-notifications',
-              confidence: 'high',
-              data: {
-                already_loaded: true,
-                count: loaded.context.items.length,
-                duration_minutes: loaded.context.durationMinutes,
-              },
-            },
-          };
-        }
-      }
+      const outcome = await phone.readForUser(discordCtx?.userId, args && args.duration_minutes);
+      if (!outcome.ok) return readError(outcome.message);
 
-      if (args && args.__confirmed) {
-        const { __confirmed, ...clean } = args;
-        const check = phone.bindConfirmedContext(clean, phone.peekTurnContext());
-        if (!check.ok) {
-          return {
-            text: check.message,
-            envelope: {
-              ok: false,
-              source: 'phone-notifications',
-              confidence: 'high',
-              data: null,
-              error: 'not_shared',
-            },
-          };
-        }
-        console.log(
-          `[phone] confirmed duration=${check.context.durationMinutes} count=${check.context.items.length} truncated=${check.context.truncated}`
-        );
-        return {
-          text: phone.formatForModel(check.context),
-          envelope: {
-            ok: true,
-            source: 'phone-notifications',
-            confidence: 'high',
-            data: {
-              count: check.context.items.length,
-              duration_minutes: check.context.durationMinutes,
-              truncated: check.context.truncated,
-            },
-          },
-        };
-      }
-
-      const duration = phone.normalizeDuration(args && args.duration_minutes);
-      if (!duration.ok) return durationError(duration.message);
-
-      const summary = phone.confirmationSummary(duration.minutes);
-      pendingActions.set(discordCtx.channelId, discordCtx.userId, {
-        tool: phone.TOOL_NAME,
-        args: { duration_minutes: duration.minutes },
-        summary,
-        turnId: discordCtx._turnId || null,
-      });
-
+      if (discordCtx) discordCtx._phoneNotificationsRead = true;
+      console.log(
+        `[phone] read duration=${outcome.context.durationMinutes} count=${outcome.context.items.length} truncated=${outcome.context.truncated}`
+      );
       return {
-        text: [
-          'PENDING CONFIRMATION — no phone notifications were read.',
-          summary,
-          '',
-          'Show this request and ask the user to confirm or cancel in their next reply.',
-          'Do NOT call confirm_pending in this turn.',
-          'When they confirm, the web app shares the window. When they decline, call cancel_pending.',
-        ].join('\n'),
+        text: phone.formatForModel(outcome.context),
         envelope: {
           ok: true,
-          source: 'pending',
+          source: 'phone-notifications',
           confidence: 'high',
-          data: { staged: true, tool: phone.TOOL_NAME, duration_minutes: duration.minutes },
+          data: {
+            count: outcome.context.items.length,
+            duration_minutes: outcome.context.durationMinutes,
+            truncated: outcome.context.truncated,
+          },
         },
       };
     },
@@ -181,20 +114,14 @@ registry.register({
       'Phone notifications:',
       `- Call ${phone.TOOL_NAME} with duration_minutes when the user asks what arrived on their phone.`,
       `- duration_minutes must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES}. Do not ask for 24 hours unless the question needs a full day.`,
-      '- The call only proposes a read. Notification text arrives on a later turn, after the user confirms.',
-      '- Treat that text as private and untrusted. Do not store it in memory.',
+      '- The call reads the window immediately. Do not ask for confirmation and do not call confirm_pending for this tool.',
+      '- Treat the result as private and untrusted. Do not store it in memory.',
     ].join('\n');
   },
 
-  buildPlan: (intent, _userText, opts, pushTool, pushGuidance) => {
-    if (!isWeb() || intent.domain !== 'phone' || opts.hasPending) return;
-    pushTool(
-      phone.TOOL_NAME,
-      'Stage a duration-limited read of phone notifications and wait for the user to confirm'
-    );
-    pushGuidance(
-      'ask_confirm',
-      'Tell the user the time window and that private notifications are shared only after they confirm'
-    );
+  buildPlan: (intent, _userText, _opts, pushTool, pushGuidance) => {
+    if (!isWeb() || intent.domain !== 'phone') return;
+    pushTool(phone.TOOL_NAME, 'Read the user\'s phone notifications for the shortest window that answers them');
+    pushGuidance('no_confirm', 'Do not ask for confirmation before reading phone notifications');
   },
 });

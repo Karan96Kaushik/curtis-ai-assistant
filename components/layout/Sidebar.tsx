@@ -1,5 +1,5 @@
 import { Link, NavLink, useNavigate } from 'react-router';
-import { CalendarClock, LogOut, Settings, SquarePen } from 'lucide-react';
+import { Bot, CalendarClock, LogOut, Settings, SquarePen } from 'lucide-react';
 import { toast } from 'sonner';
 import ConversationList from '@/components/chat/ConversationList';
 import { BrandMark } from '@/components/layout/BrandMark';
@@ -42,6 +42,18 @@ export default function Sidebar() {
 
       {user && (
         <div className="border-t border-sidebar-border p-2">
+          <NavLink
+            to="/agents"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent',
+                isActive && 'bg-sidebar-accent font-medium'
+              )
+            }
+          >
+            <Bot className="size-4" />
+            Agents
+          </NavLink>
           <NavLink
             to="/schedules"
             className={({ isActive }) =>

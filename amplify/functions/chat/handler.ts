@@ -3,7 +3,6 @@ import { HttpError, json, parseBody, withHttp } from '../_shared/http.js';
 import { enforceRateLimit } from '../_shared/rateLimit.js';
 import { supabaseForCaller } from '../_shared/supabaseUser.js';
 import { requireAllowedCaller, type AuthedCaller } from '../_shared/verifySupabaseAuth.js';
-import type { StoredPendingAction } from './agentRuntime.js';
 import aiRouter from '../../../src/integrations/aiRouter.js';
 import { isAgentModel, resolveAgentModel } from '../../../lib/chat/models.js';
 import { isCancelError, watchCancellation } from './cancellation.js';
@@ -14,7 +13,6 @@ import {
   type ConversationRow,
 } from './conversationTurn.js';
 import { proposeBehavior } from './proposeBehavior.js';
-import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 
 interface TurnCtx {
   model: string;
@@ -27,12 +25,6 @@ const { runWithTurn } = aiRouter as unknown as {
   runWithTurn<T>(ctx: TurnCtx, fn: () => Promise<T>): Promise<T>;
 };
 
-const phone = phoneNotifications as unknown as {
-  TOOL_NAME: string;
-  isConfirmation(text: string): boolean;
-  parseClientPayload(raw: unknown): { context: { durationMinutes: number } | null; error: string | null };
-};
-
 interface ChatRequest {
   action?: 'send' | 'propose-behavior';
   conversationId?: string | null;
@@ -41,11 +33,6 @@ interface ChatRequest {
   model?: string;
   /** Client id for this turn, so Stop can mark it cancelled. */
   turnId?: string;
-  /**
-   * Phone notifications the browser read after the user confirmed a request.
-   * Ignored unless this message confirms a pending request_phone_notifications action.
-   */
-  phoneNotifications?: unknown;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -65,15 +52,6 @@ async function createConversation(db: SupabaseClient, caller: AuthedCaller, text
     .single();
   if (error) throw dbError('create a conversation', error);
   return data as ConversationRow;
-}
-
-/** Attach a notification window only when this message confirms a staged phone read. */
-function phoneContextForTurn(text: string, pending: StoredPendingAction | null, raw: unknown): unknown {
-  const parsed = phone.parseClientPayload(raw);
-  if (parsed.error) throw new HttpError(400, parsed.error);
-  if (!parsed.context) return null;
-  if (!pending || pending.tool !== phone.TOOL_NAME || !phone.isConfirmation(text)) return null;
-  return parsed.context;
 }
 
 function requestedModel(body: ChatRequest): string {
@@ -147,7 +125,6 @@ export const handler = withHttp('chat', async (event) => {
         },
         conversation,
         text,
-        phoneNotifications: phoneContextForTurn(text, conversation.pending_action, body.phoneNotifications),
         signal: controller.signal,
         model,
         switches: turnCtx.switches,

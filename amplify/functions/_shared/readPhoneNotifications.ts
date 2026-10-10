@@ -1,13 +1,11 @@
-import {
-  LOOKUP_TIMEOUT_MS,
-  MAX_BODY_CHARS,
-  MAX_ITEMS,
-  TOOL_NAME,
-  sanitizeContext,
-} from '@/src/ai/phoneNotifications.js';
-import { supabase } from '@/utils/supabase';
+import phoneNotifications from '../../../src/ai/phoneNotifications.js';
+import { supabaseAsService } from './supabaseUser.js';
 
-export { TOOL_NAME };
+const phone = phoneNotifications as unknown as {
+  MAX_ITEMS: number;
+  MAX_BODY_CHARS: number;
+  LOOKUP_TIMEOUT_MS: number;
+};
 
 export interface PhoneNotificationItem {
   appName: string;
@@ -15,13 +13,6 @@ export interface PhoneNotificationItem {
   text: string;
   category: string;
   postedAt: string;
-}
-
-export interface PhoneNotificationContext {
-  durationMinutes: number;
-  fetchedAt: string;
-  truncated: boolean;
-  items: PhoneNotificationItem[];
 }
 
 interface NotificationQueryRow {
@@ -64,76 +55,68 @@ function toItem(row: NotificationQueryRow, postedAt: number | string | null | un
   return {
     appName: (row.app_name || row.package_name || '').trim(),
     title: (row.title || '').trim(),
-    text: notificationBody(row).slice(0, MAX_BODY_CHARS),
+    text: notificationBody(row).slice(0, phone.MAX_BODY_CHARS),
     category: (row.category || '').trim(),
     postedAt: iso,
   };
 }
 
 /**
- * Read the signed-in user's notification rows for the approved window.
- * The query itself is time-boxed so a stuck read cannot hold the chat turn open.
+ * Read `userId`'s notification rows for the requested window.
+ * Uses SUPABASE_SECRET_KEY_CURTIS so RLS does not block the agent. The user id
+ * filter is the authorization boundary — never omit it.
  */
-export async function listPhoneNotifications(
-  durationMinutes: number,
-  signal?: AbortSignal
-): Promise<PhoneNotificationContext> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError) throw userError;
-  const userId = userData.user?.id;
-  if (!userId) throw new Error('Sign in to read phone notifications.');
+export async function readPhoneNotifications(
+  userId: string,
+  durationMinutes: number
+): Promise<{ items: PhoneNotificationItem[]; truncated: boolean }> {
+  if (!userId) throw new Error('No signed-in user for this turn.');
 
   const sinceMs = Date.now() - durationMinutes * 60_000;
+  const db = supabaseAsService();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
-  const onAbort = () => controller.abort();
-  signal?.addEventListener('abort', onAbort);
-  if (signal?.aborted) controller.abort();
+  const timer = setTimeout(() => controller.abort(), phone.LOOKUP_TIMEOUT_MS);
+  const limit = phone.MAX_ITEMS + 1;
 
   try {
-    const posted = await supabase
+    const posted = await db
       .from('notifications')
       .select('app_name, package_name, title, text, sub_text, big_text, category, posted_at')
       .eq('user_id', userId)
       .gte('posted_at', sinceMs)
       .order('posted_at', { ascending: false })
-      .limit(MAX_ITEMS + 1)
+      .limit(limit)
       .abortSignal(controller.signal);
 
     let rows = (posted.data ?? []) as NotificationQueryRow[];
     let error = posted.error;
     if (error && /posted_at/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message)) {
-      const created = await supabase
+      const created = await db
         .from('notifications')
         .select('app_name, package_name, title, text, sub_text, big_text, category, created_at')
         .eq('user_id', userId)
         .gte('created_at', sinceMs)
         .order('created_at', { ascending: false })
-        .limit(MAX_ITEMS + 1)
+        .limit(limit)
         .abortSignal(controller.signal);
       rows = (created.data ?? []) as NotificationQueryRow[];
       error = created.error;
     }
-    if (error) throw error;
+    if (error) {
+      console.error('[phone] notifications select failed', error.message);
+      throw new Error('Could not read phone notifications');
+    }
 
-    const truncated = rows.length > MAX_ITEMS;
+    const truncated = rows.length > phone.MAX_ITEMS;
     const items = rows
-      .slice(0, MAX_ITEMS)
+      .slice(0, phone.MAX_ITEMS)
       .map((row) => toItem(row, row.posted_at ?? row.created_at))
       .filter((item): item is PhoneNotificationItem => item != null);
-
-    const context = sanitizeContext(
-      { durationMinutes, truncated, items },
-      durationMinutes
-    ) as PhoneNotificationContext;
-    return context;
+    return { items, truncated };
   } catch (err) {
-    if (controller.signal.aborted && !signal?.aborted) {
-      throw new Error('Reading phone notifications took too long.');
-    }
+    if (controller.signal.aborted) throw new Error('Reading phone notifications took too long.');
     throw err;
   } finally {
     clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
   }
 }

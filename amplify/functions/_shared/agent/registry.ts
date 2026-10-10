@@ -1,0 +1,152 @@
+import { z } from 'zod';
+import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
+import { capText, wrapUntrusted } from './text.js';
+
+export const CORE_TOOLS = new Set(['ask_user', 'finish', 'update_scratchpad']);
+
+const askUser = z.object({
+  question: z.string().min(1).max(500),
+  options: z.array(z.string().min(1).max(80)).max(6).optional(),
+});
+
+const finish = z.object({
+  summary: z.string().min(1).max(2000),
+});
+
+const scratchpad = z.object({
+  text: z.string().max(800),
+});
+
+const emailList = z.object({
+  query: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+
+const emailGet = z.object({
+  id: z.string().min(1).max(40),
+});
+
+function parameters(schema: z.ZodType): Record<string, unknown> {
+  const json = schema.toJSONSchema() as Record<string, unknown>;
+  delete json.$schema;
+  return json;
+}
+
+/** Providers reject dots in function names. The registry keeps the dotted form. */
+export function modelToolName(name: string): string {
+  return name.replaceAll('.', '__');
+}
+
+export function registryToolName(name: string): string {
+  if (name.includes('.')) return name;
+  return name.replaceAll('__', '.');
+}
+
+const noop = async () => ({ text: '' });
+
+export const TOOLS: ToolDef[] = [
+  {
+    name: 'ask_user',
+    integration: 'core',
+    access: 'read',
+    risk: 'low',
+    description: 'Pause and ask the user a clarifying question.',
+    schema: askUser,
+    maxResultChars: 2000,
+    handler: noop,
+  },
+  {
+    name: 'finish',
+    integration: 'core',
+    access: 'read',
+    risk: 'low',
+    description: 'Complete the run with a short summary for the user.',
+    schema: finish,
+    maxResultChars: 2000,
+    handler: noop,
+  },
+  {
+    name: 'update_scratchpad',
+    integration: 'core',
+    access: 'write',
+    risk: 'low',
+    description: 'Replace your working notes (plan, progress, and key IDs).',
+    schema: scratchpad,
+    maxResultChars: 200,
+    handler: noop,
+  },
+  {
+    name: 'email.list',
+    integration: 'email',
+    access: 'read',
+    risk: 'low',
+    description: 'List recent email notifications with sender, subject, and a short snippet.',
+    schema: emailList,
+    maxResultChars: 2500,
+    handler: async (args, ctx) => {
+      const parsed = emailList.parse(args);
+      const items = await ctx.email.list(ctx.userId, parsed.query, parsed.limit ?? 10);
+      const text = items.length
+        ? items
+            .map((item) => `${item.id} | ${item.sender} | ${item.subject} | ${item.snippet}`)
+            .join('\n')
+        : 'No matching email notifications.';
+      return { text };
+    },
+  },
+  {
+    name: 'email.get',
+    integration: 'email',
+    access: 'read',
+    risk: 'low',
+    description: 'Read one email notification body by id from email.list.',
+    schema: emailGet,
+    maxResultChars: 4000,
+    handler: async (args, ctx) => {
+      const parsed = emailGet.parse(args);
+      const item = await ctx.email.get(ctx.userId, parsed.id);
+      if (!item) return { text: 'Email not found.' };
+      const body = item.body.slice(0, 3000);
+      return { text: `From: ${item.sender}\nSubject: ${item.subject}\n\n${body}` };
+    },
+  },
+];
+
+const BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
+
+export function getTool(name: string): ToolDef | undefined {
+  return BY_NAME.get(registryToolName(name));
+}
+
+export function toolAllowed(profile: ProfileSnapshot, name: string): boolean {
+  const registryName = registryToolName(name);
+  if (CORE_TOOLS.has(registryName)) return true;
+  return profile.allowed_tools.includes(registryName);
+}
+
+export function toolsForProfile(profile: ProfileSnapshot, tools: ToolDef[] = TOOLS): ToolDef[] {
+  return tools.filter((tool) => CORE_TOOLS.has(tool.name) || profile.allowed_tools.includes(tool.name));
+}
+
+export function toModelTools(tools: ToolDef[]): ModelTool[] {
+  return tools.map((tool) => ({
+    type: 'function',
+    function: {
+      name: modelToolName(tool.name),
+      description: tool.description,
+      parameters: parameters(tool.schema),
+    },
+  }));
+}
+
+export function presentToolResult(tool: ToolDef, text: string, id: string): string {
+  const capped = capText(text, tool.maxResultChars, tool.name);
+  if (tool.integration === 'core') return capped;
+  return wrapUntrusted(tool.name, id, capped);
+}
+
+export function knownToolNames(tools: ToolDef[] = TOOLS): Set<string> {
+  return new Set(tools.map((tool) => tool.name));
+}
+
+export type { EmailDetail, EmailListItem, EmailReader };

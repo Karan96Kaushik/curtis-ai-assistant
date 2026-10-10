@@ -1,7 +1,7 @@
 import outputs from '@/amplify_outputs.json';
 import { supabase } from '@/utils/supabase';
 
-export type FunctionKey = 'chat' | 'sendPush';
+export type FunctionKey = 'chat' | 'sendPush' | 'agentApi';
 
 const FUNCTION_KEYS: FunctionKey[] = ['chat', 'sendPush'];
 
@@ -14,6 +14,8 @@ function functionUrl(key: FunctionKey): string | null {
 }
 
 export const functionsConfigured = FUNCTION_KEYS.every((key) => functionUrl(key) !== null);
+
+export const agentApiConfigured = functionUrl('agentApi') !== null;
 
 export class FunctionConfigError extends Error {
   constructor(key: FunctionKey) {

@@ -32,7 +32,7 @@ export default function AppShell() {
             </SheetTrigger>
             <SheetContent className="bg-sidebar p-0">
               <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <SheetDescription className="sr-only">Chats and settings</SheetDescription>
+              <SheetDescription className="sr-only">Chats, agents, and settings</SheetDescription>
               <Sidebar />
             </SheetContent>
           </Sheet>

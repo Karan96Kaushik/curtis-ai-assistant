@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { HttpError } from '../_shared/http.js';
 import modelCatalog from '../../../src/integrations/modelCatalog.js';
-import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 import { isCancelError } from './cancellation.js';
 import {
   applyContexts,
@@ -17,8 +16,6 @@ import {
   type StateFile,
   type StoredPendingAction,
 } from './agentRuntime.js';
-
-const phone = phoneNotifications as unknown as { TOOL_NAME: string };
 
 const catalog = modelCatalog as unknown as {
   switchNotice(switches: { from: string; to: string }[] | undefined): string | null;
@@ -45,7 +42,6 @@ export interface PendingSummary {
   tool: string;
   summary: string;
   createdAt: number;
-  durationMinutes?: number;
 }
 
 export type ExecuteResult =
@@ -72,16 +68,11 @@ export function dbError(action: string, error: { message: string }): HttpError {
 
 export function pendingSummary(pending: StoredPendingAction | null): PendingSummary | null {
   if (!pending) return null;
-  const summary: PendingSummary = {
+  return {
     tool: pending.tool,
     summary: pending.summary,
     createdAt: pending.createdAt,
   };
-  if (pending.tool === phone.TOOL_NAME) {
-    const minutes = pending.args?.duration_minutes;
-    if (typeof minutes === 'number') summary.durationMinutes = minutes;
-  }
-  return summary;
 }
 
 export async function loadOwnedConversation(
@@ -164,7 +155,6 @@ export async function executeConversationPrompt({
   conversation,
   text,
   agentText,
-  phoneNotifications: phoneContext = null,
   signal,
   model,
   switches,
@@ -176,7 +166,6 @@ export async function executeConversationPrompt({
   text: string;
   /** Model input when it should differ from the transcript line stored in messages. */
   agentText?: string;
-  phoneNotifications?: unknown;
   signal?: AbortSignal;
   model: string;
   switches: { from: string; to: string }[];
@@ -210,7 +199,6 @@ export async function executeConversationPrompt({
         pending: conversation.pending_action,
         files,
       },
-      phoneNotifications: phoneContext,
       scheduling: { db, model },
     });
     if (signal?.aborted) {

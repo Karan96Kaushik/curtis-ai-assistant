@@ -24,7 +24,16 @@ const config = require('../config');
 const MAX_TOOL_ROUNDS = 8;
 
 /** Read-only tools that must still run one at a time (they touch per-session state). */
-const SERIAL_TOOLS = new Set(['confirm_pending', 'cancel_pending', 'clear_context', 'clear_chat', 'memory_append', 'memory_write']);
+const SERIAL_TOOLS = new Set([
+  'confirm_pending',
+  'cancel_pending',
+  'clear_context',
+  'clear_chat',
+  'memory_append',
+  'memory_write',
+  'request_phone_notifications',
+]);
+const MEMORY_TOOLS = new Set(['memory_append', 'memory_write']);
 
 const CANCEL_RE =
   /^(n|no|nope|nah|cancel|cancelled|canceled|never\s*mind|nevermind|stop|abort|don'?t)([\s.!?]|$)/i;
@@ -514,30 +523,6 @@ async function handleUserMessage(input) {
       }
     }
 
-    // Phone notifications are read in the browser and attached to this turn.
-    // Keep going so the model can answer the earlier question, instead of dumping the list.
-    if (
-      requireConfirmation() &&
-      isUserConfirmation(text) &&
-      pending?.tool === phoneNotifications.TOOL_NAME
-    ) {
-      const check = phoneNotifications.bindConfirmedContext(pending.args, phoneNotifications.peekTurnContext());
-      if (!check.ok) {
-        const reply = check.message;
-        conversationStore.appendMessage(channelId, userId, 'assistant', reply, discord);
-        prep.end('phone-notifications-missing');
-        total.end('phone-notifications-missing');
-        return reply;
-      }
-      pendingActions.clear(channelId, userId);
-      pending = null;
-      hasPending = false;
-      turnCtx.phoneNotificationContext = check.context;
-      console.log(
-        `[agent] phone notifications shared duration=${check.context.durationMinutes} count=${check.context.items.length}`
-      );
-    }
-
     // Fast-path: short yes/confirm executes the staged action without another LLM ask-loop
     if (requireConfirmation() && isUserConfirmation(text) && pending) {
       const confirmHandler = registry.getToolHandler('confirm_pending');
@@ -586,12 +571,6 @@ async function handleUserMessage(input) {
     // L3 — Mode-scoped tools
     const confirmOn = requireConfirmation();
     let tools = toolsForIntent(intent, { confirmOn, hasPending });
-    if (turnCtx.phoneNotificationContext) {
-      // Keep request_phone_notifications in the tool list. The model often calls it
-      // again after confirm, and the provider rejects a call to a tool that was omitted.
-      const blocked = new Set(['memory_append', 'memory_write']);
-      tools = tools.filter((tool) => !blocked.has(tool.function.name));
-    }
 
     // Identity lookups are cached per process; only block on them for turns that use them.
     const warming = identity.warm();
@@ -603,13 +582,6 @@ async function handleUserMessage(input) {
       { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan, workspace }) },
       ...history,
     ];
-
-    if (turnCtx.phoneNotificationContext) {
-      messages.push({
-        role: 'system',
-        content: phoneNotifications.formatForModel(turnCtx.phoneNotificationContext),
-      });
-    }
 
     if (intent.isWorkAgenda) {
       messages.push({
@@ -700,6 +672,12 @@ async function handleUserMessage(input) {
               { ok: false, source: 'policy', confidence: 'high', data: null, error: 'tool_not_allowed' }
             );
           }
+          if (MEMORY_TOOLS.has(fnName) && turnCtx._phoneNotificationsRead) {
+            return asToolPayload(
+              'Error: phone notification text must not be saved to memory.',
+              { ok: false, source: 'policy', confidence: 'high', data: null, error: 'phone_memory_blocked' }
+            );
+          }
           try {
             const handler = registry.getToolHandler(fnName);
             return handler ? await handler(normalized, turnCtx) : await runTool(fnName, normalized, turnCtx);
@@ -737,6 +715,11 @@ async function handleUserMessage(input) {
             content: resultText.slice(0, 8000),
           });
         });
+        if (turnCtx._phoneNotificationsRead) {
+          for (let j = tools.length - 1; j >= 0; j -= 1) {
+            if (MEMORY_TOOLS.has(tools[j].function.name)) tools.splice(j, 1);
+          }
+        }
         roundTimer.end(`tool_calls=${toolCalls.map((c) => c.function?.name).join(',')}`);
         if (verbatimReply) break;
         continue;

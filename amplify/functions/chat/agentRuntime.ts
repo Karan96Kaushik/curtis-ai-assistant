@@ -8,6 +8,7 @@ import registry from '../../../src/core/moduleRegistry.js';
 import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 import pushNotificationsModule from '../../../src/ai/pushNotifications.js';
 import { sendPushToUser } from '../_shared/fcm.js';
+import { readPhoneNotifications } from '../_shared/readPhoneNotifications.js';
 import { HttpError } from '../_shared/http.js';
 import { cancelScheduledJob, createScheduledJob, listScheduledJobs } from '../_shared/scheduledJobs.js';
 import webSchedulerModule from '../../../src/modules/webScheduler.js';
@@ -54,6 +55,17 @@ pushNotifications.configure(async (userId, payload) => {
     throw err;
   }
 });
+
+/** Agent phone-notification tool: service-role read of this user's rows. No confirmation gate. */
+const phoneReader = phoneNotifications as unknown as {
+  configure(
+    fn: (
+      userId: string,
+      durationMinutes: number
+    ) => Promise<{ items: { appName: string; title: string; text: string; category: string; postedAt: string }[]; truncated: boolean }>
+  ): void;
+};
+phoneReader.configure((userId, durationMinutes) => readPhoneNotifications(userId, durationMinutes));
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge
@@ -209,25 +221,17 @@ function resetMemory(channelId: string, userId: string): void {
  * execution environment at a time, so those stores (and the state dir) are
  * loaded from the snapshot here and wiped again before returning.
  */
-const phone = phoneNotifications as unknown as {
-  setTurnContext(context: unknown): void;
-  clearTurnContext(): void;
-};
-
 export async function runAgentTurn({
   conversationId,
   user,
   text,
   snapshot,
-  phoneNotifications: phoneContext = null,
   scheduling = null,
 }: {
   conversationId: string;
   user: AgentUser;
   text: string;
   snapshot: AgentSnapshot;
-  /** Sanitized notification window for this turn. Null unless the user just confirmed a share. */
-  phoneNotifications?: unknown;
   /** Present on web turns so schedule_task can write the caller's jobs. */
   scheduling?: { db: SupabaseClient; model: string } | null;
 }): Promise<TurnResult> {
@@ -243,7 +247,6 @@ export async function runAgentTurn({
   };
 
   resetMemory(channelId, userId);
-  phone.setTurnContext(phoneContext);
   if (scheduling) {
     activeScheduling = { db: scheduling.db, userId, conversationId, model: scheduling.model };
   }
@@ -297,7 +300,6 @@ export async function runAgentTurn({
     };
   } finally {
     activeScheduling = null;
-    phone.clearTurnContext();
     resetMemory(channelId, userId);
     await fs.rm(stateDir(), { recursive: true, force: true });
   }
