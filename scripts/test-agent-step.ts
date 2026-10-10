@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { z } from 'zod';
 import { apiModelId, chainFromModelIds } from '../lib/agents/modelChain.js';
 import { buildContext, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
+import { toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import type { AgentRuntime } from '../amplify/functions/_shared/agent/deps.js';
 import { executeTool } from '../amplify/functions/_shared/agent/execute.js';
 import { eventsOf, MemoryAgentStore } from '../amplify/functions/_shared/agent/memoryStore.js';
@@ -342,6 +343,12 @@ describe('context and tool output', () => {
     assert.equal(toModelTools(toolsForProfile(profile())).some((tool) => tool.function.name === 'request_phone_notifications'), true);
     assert.equal(toModelTools(toolsForProfile(profile())).some((tool) => tool.function.name === 'jira_search'), false);
     assert.equal(modelToolName('email.list'), 'email__list');
+    const wire = toProviderMessages([
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', name: 'request_phone_notifications', arguments: '{"duration_minutes":60}' }] },
+    ]);
+    const call = (wire[0]?.tool_calls as { type?: string; function?: { name?: string } }[])[0];
+    assert.equal(call?.type, 'function');
+    assert.equal(call?.function?.name, 'request_phone_notifications');
   });
 
   it('keeps the selected model order and strips the OpenRouter prefix', () => {

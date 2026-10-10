@@ -26,6 +26,34 @@ interface ChoiceMessage {
   }[];
 }
 
+/** OpenAI-compatible providers require type and a nested function on each tool call. */
+export function toProviderMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+  return messages.map((message) => {
+    if (message.role === 'tool') {
+      return {
+        role: 'tool',
+        content: message.content ?? '',
+        tool_call_id: message.tool_call_id ?? '',
+      };
+    }
+    if (message.role !== 'assistant' || !message.tool_calls?.length) {
+      return { role: message.role, content: message.content };
+    }
+    return {
+      role: 'assistant',
+      content: message.content,
+      tool_calls: message.tool_calls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: {
+          name: call.name,
+          arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}),
+        },
+      })),
+    };
+  });
+}
+
 function chainFor(profile: ProfileSnapshot): { provider: ProviderName; model: string }[] {
   const allowed = new Set(profile.allowed_providers);
   const seen = new Set<string>();
@@ -126,7 +154,7 @@ export async function callModelChain(opts: {
 
     const body: Record<string, unknown> = {
       model: apiModelId(current.provider, current.model),
-      messages: opts.messages,
+      messages: toProviderMessages(opts.messages),
       temperature: 0.2,
       tools: opts.tools,
       tool_choice: 'auto',

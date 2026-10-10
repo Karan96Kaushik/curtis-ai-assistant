@@ -91,7 +91,7 @@ export const TOOLS: ToolDef[] = [
     maxResultChars: 4000,
     handler: async (args, ctx) => {
       const parsed = phoneNotifications.parse(args);
-      const cutoff = Date.now() - parsed.duration_minutes * 60_000;
+      const cutoff = ctx.now.getTime() - parsed.duration_minutes * 60_000;
       const items = (await ctx.email.list(ctx.userId, undefined, 40)).filter(
         (item) => Date.parse(item.postedAt) >= cutoff
       );

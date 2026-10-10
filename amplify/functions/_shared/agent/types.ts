@@ -169,6 +169,7 @@ export interface ToolCtx {
   userId: string;
   runId: string;
   email: EmailReader;
+  now: Date;
 }
 
 export interface ToolDef {

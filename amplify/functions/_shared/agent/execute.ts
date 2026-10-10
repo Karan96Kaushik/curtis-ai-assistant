@@ -6,6 +6,7 @@ import type { EmailReader, RunRecord, ToolDef } from './types.js';
 export interface ToolHost {
   store: AgentStore;
   email: EmailReader;
+  now: () => Date;
 }
 
 export async function executeTool(
@@ -32,7 +33,7 @@ export async function executeTool(
   }
 
   try {
-    const result = await def.handler(args, { userId: run.user_id, runId: run.id, email: rt.email });
+    const result = await def.handler(args, { userId: run.user_id, runId: run.id, email: rt.email, now: rt.now() });
     const id = typeof args.id === 'string' ? args.id : run.id;
     const text = presentToolResult(def, result.text, id);
     await rt.store.completeToolCall(run.id, toolCallId, 'done', { text });
