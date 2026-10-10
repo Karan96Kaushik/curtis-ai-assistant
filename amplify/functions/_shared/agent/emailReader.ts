@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EmailDetail, EmailListItem, EmailReader } from './types.js';
 
-const MAIL = /gmail|outlook|mail|proton|yahoo|email|superhuman/i;
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface NotificationRow {
@@ -42,12 +41,8 @@ function snippet(text: string): string {
   return flat.length <= 150 ? flat : `${flat.slice(0, 150)}…`;
 }
 
-function isMail(row: NotificationRow): boolean {
-  return MAIL.test(`${row.app_name ?? ''} ${row.package_name ?? ''}`);
-}
-
 /**
- * Email tools read mail-like rows from the phone notifications table.
+ * Phone-notification reads from the same table the chat tool uses.
  * There is no mailbox send credential; this path is read-only.
  */
 export function supabaseEmailReader(db: SupabaseClient): EmailReader {
@@ -56,7 +51,6 @@ export function supabaseEmailReader(db: SupabaseClient): EmailReader {
       const rows = await loadRecent(db, userId);
       const needle = query?.trim().toLowerCase();
       return rows
-        .filter(isMail)
         .filter((row) => {
           if (!needle) return true;
           const hay = `${row.title ?? ''} ${bodyOf(row)} ${row.app_name ?? ''}`.toLowerCase();

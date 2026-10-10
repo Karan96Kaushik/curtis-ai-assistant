@@ -1,7 +1,7 @@
 import { buildContext, summaryUpdate } from './context.js';
 import type { AgentRuntime } from './deps.js';
 import { executeTool } from './execute.js';
-import { modelToolName, registryToolName, toModelTools, toolAllowed } from './registry.js';
+import { modelToolName, registryToolName, toModelTools, toolAllowed, toolsForProfile } from './registry.js';
 import { preview, redactValue } from './text.js';
 import type { ChatMessage, EventType, ParsedToolCall, RunRecord, StepOutcome, ToolCall } from './types.js';
 
@@ -94,7 +94,7 @@ export async function handleStep(
   }
 
   run.next_attempt_at = null;
-  const tools = rt.tools.filter((tool) => toolAllowed(profile, tool.name));
+  const tools = toolsForProfile(profile, rt.tools);
   const prompt = buildContext(run);
   const out = await rt.callModel(profile, prompt, toModelTools(tools));
 

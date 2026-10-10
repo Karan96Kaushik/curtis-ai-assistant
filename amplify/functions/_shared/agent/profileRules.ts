@@ -1,23 +1,21 @@
-import type { ProfileSnapshot, ProviderName, ToolDef } from './types.js';
+import { PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
+import type { ProfileSnapshot, ProviderName } from './types.js';
 
 export const CORE_TOOL_NAMES = new Set(['ask_user', 'finish', 'update_scratchpad']);
 
-/** Reads of private message content. */
-export const PRIVATE_READ_TOOLS = new Set([
-  'email.list',
-  'email.get',
-  'whatsapp.list_chats',
-  'whatsapp.get_messages',
-]);
+/** Reads of private message or device-notification content. Matches the profile catalog. */
+export const PRIVATE_READ_TOOLS = new Set(
+  PERMISSION_TOOLS.filter((tool) => tool.privateRead).map((tool) => tool.name)
+);
 
 /**
- * Outbound writes that can leave the user's accounts.
- * push.send is to the user only, so it is not in this set.
+ * Writes that can leave the user's own devices.
+ * send_push_notification is to the user only, so it is not outbound.
  */
-export function outboundToolNames(tools: readonly Pick<ToolDef, 'name' | 'integration' | 'access'>[]): Set<string> {
-  const names = new Set<string>(['email.send', 'whatsapp.send']);
+export function outboundToolNames(tools: readonly { name: string; outbound?: boolean }[]): Set<string> {
+  const names = new Set<string>();
   for (const tool of tools) {
-    if (tool.integration === 'github' && tool.access === 'write') names.add(tool.name);
+    if (tool.outbound) names.add(tool.name);
   }
   return names;
 }
@@ -119,10 +117,10 @@ export function defaultModelChain(): ProfileSnapshot['model_chain'] {
 export function inboxProfileDraft(): ProfileDraft {
   return {
     name: 'Inbox',
-    description: 'Reads recent email notifications from your phone. Does not send mail.',
+    description: 'Reads recent phone notifications. Does not send messages.',
     system_prompt:
-      'You triage the user\'s recent email. Read the mailbox, summarize what needs attention, and finish with a short summary. Ask when a choice is ambiguous.',
-    allowed_tools: ['email.list', 'email.get'],
+      'You triage the user\'s recent phone notifications. Read them, summarize what needs attention, and finish with a short summary. Ask when a choice is ambiguous.',
+    allowed_tools: ['request_phone_notifications'],
     approval_required: [],
     model_chain: defaultModelChain(),
     allowed_providers: ['groq', 'google'],

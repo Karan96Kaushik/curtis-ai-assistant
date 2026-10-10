@@ -19,13 +19,8 @@ const scratchpad = z.object({
   text: z.string().max(800),
 });
 
-const emailList = z.object({
-  query: z.string().max(200).optional(),
-  limit: z.number().int().min(1).max(10).optional(),
-});
-
-const emailGet = z.object({
-  id: z.string().min(1).max(40),
+const phoneNotifications = z.object({
+  duration_minutes: z.number().int().min(1).max(24 * 60),
 });
 
 const pushSend = z.object({
@@ -87,46 +82,34 @@ export const TOOLS: ToolDef[] = [
     handler: noop,
   },
   {
-    name: 'email.list',
-    integration: 'email',
+    name: 'request_phone_notifications',
+    integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'List recent email notifications with sender, subject, and a short snippet.',
-    schema: emailList,
-    maxResultChars: 2500,
+    description: 'Read this user\'s recent phone notifications, including mail, codes, and personal messages.',
+    schema: phoneNotifications,
+    maxResultChars: 4000,
     handler: async (args, ctx) => {
-      const parsed = emailList.parse(args);
-      const items = await ctx.email.list(ctx.userId, parsed.query, parsed.limit ?? 10);
+      const parsed = phoneNotifications.parse(args);
+      const cutoff = Date.now() - parsed.duration_minutes * 60_000;
+      const items = (await ctx.email.list(ctx.userId, undefined, 40)).filter(
+        (item) => Date.parse(item.postedAt) >= cutoff
+      );
       const text = items.length
         ? items
+            .slice(0, 20)
             .map((item) => `${item.id} | ${item.sender} | ${item.subject} | ${item.snippet}`)
             .join('\n')
-        : 'No matching email notifications.';
+        : 'No phone notifications in that window.';
       return { text };
     },
   },
   {
-    name: 'email.get',
-    integration: 'email',
-    access: 'read',
-    risk: 'low',
-    description: 'Read one email notification body by id from email.list.',
-    schema: emailGet,
-    maxResultChars: 4000,
-    handler: async (args, ctx) => {
-      const parsed = emailGet.parse(args);
-      const item = await ctx.email.get(ctx.userId, parsed.id);
-      if (!item) return { text: 'Email not found.' };
-      const body = item.body.slice(0, 3000);
-      return { text: `From: ${item.sender}\nSubject: ${item.subject}\n\n${body}` };
-    },
-  },
-  {
-    name: 'push.send',
+    name: 'send_push_notification',
     integration: 'push',
     access: 'write',
     risk: 'low',
-    description: 'Send a push notification to yourself.',
+    description: 'Send a push notification to this user\'s Android app.',
     schema: pushSend,
     maxResultChars: 200,
     handler: async (args, ctx) => {
@@ -148,6 +131,7 @@ for (const tool of PERMISSION_TOOLS) {
     schema: unavailableArgs,
     maxResultChars: 300,
     available: false,
+    outbound: tool.outbound,
     handler: async () => ({ text: `${tool.name} is not connected yet.` }),
   });
 }

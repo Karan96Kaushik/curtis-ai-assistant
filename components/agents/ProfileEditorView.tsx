@@ -36,7 +36,7 @@ export default function ProfileEditorView() {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [modelIds, setModelIds] = useState<string[]>([...DEFAULT_MODEL_IDS]);
   const [showErrors, setShowErrors] = useState(false);
-  const [allowed, setAllowed] = useState<string[]>(['email.list', 'email.get']);
+  const [allowed, setAllowed] = useState<string[]>(['request_phone_notifications']);
   const [approval, setApproval] = useState<string[]>([]);
   const [maxSteps, setMaxSteps] = useState(25);
   const [maxRuntimeMin, setMaxRuntimeMin] = useState(60);
@@ -203,8 +203,9 @@ export default function ProfileEditorView() {
         <CardHeader>
           <CardTitle className="text-base">Permissions</CardTitle>
           <CardDescription>
-            The agent only receives the tools you allow. ask_user, update_scratchpad, and finish are always available. Turning on a write
-            requires approval until you clear it.
+            These are the same functions the chat assistant can call. The agent only receives the ones you allow. ask_user,
+            update_scratchpad, and finish are always available. Turning on a write requires approval until you clear it. Chat session
+            controls such as confirm_pending are not listed; agent runs pause for approval instead.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

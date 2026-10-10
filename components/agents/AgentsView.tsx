@@ -181,7 +181,7 @@ export default function AgentsView() {
             )}
           </div>
           <div className="flex flex-wrap gap-1">
-            {(selected?.allowed_tools ?? ['email.list', 'email.get']).map((tool) => (
+            {(selected?.allowed_tools ?? ['request_phone_notifications']).map((tool) => (
               <Badge key={tool} variant="outline">
                 {tool}
                 {selected?.approval_required.includes(tool) ? ' · approval' : ''}

@@ -130,7 +130,19 @@ export interface AgentEvent {
 
 export type ToolAccess = 'read' | 'write';
 export type ToolRisk = 'low' | 'medium' | 'high';
-export type ToolIntegration = 'email' | 'whatsapp' | 'jira' | 'github' | 'push' | 'schedule' | 'core';
+export type ToolIntegration =
+  | 'phone'
+  | 'push'
+  | 'jira'
+  | 'github'
+  | 'web'
+  | 'browser'
+  | 'teams'
+  | 'scheduler'
+  | 'memory'
+  | 'timesheet'
+  | 'release'
+  | 'core';
 
 export interface EmailListItem {
   id: string;
@@ -169,6 +181,8 @@ export interface ToolDef {
   maxResultChars: number;
   /** Omitted tools are callable. False keeps a granted tool off the model until it is connected. */
   available?: boolean;
+  /** Can send content outside the user's own devices. */
+  outbound?: boolean;
   handler: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<{ text: string }>;
 }
 
