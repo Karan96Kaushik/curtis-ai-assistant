@@ -14,7 +14,7 @@ export const PRIVATE_READ_TOOLS = new Set([
  * Outbound writes that can leave the user's accounts.
  * push.send is to the user only, so it is not in this set.
  */
-export function outboundToolNames(tools: Pick<ToolDef, 'name' | 'integration' | 'access'>[]): Set<string> {
+export function outboundToolNames(tools: readonly Pick<ToolDef, 'name' | 'integration' | 'access'>[]): Set<string> {
   const names = new Set<string>(['email.send', 'whatsapp.send']);
   for (const tool of tools) {
     if (tool.integration === 'github' && tool.access === 'write') names.add(tool.name);
