@@ -149,6 +149,9 @@ When the estimate exceeds 60% of usable context (8000 for Google-first, else 600
 | `draft_reply` | Push + run-page link; user sends |
 | `send_push_notification` | Rich FCM to own devices (title/body + channel, key, deep link, actions, progress). Android contract: `context/android-push-notifications-spec.md` |
 | `schedule_task` / `list_schedules` / `cancel_schedule` | Agent schedules on this profile |
+| GitHub tools (`github_search_prs`, `github_get_pr`, …) | Same `GITHUB_TOKEN` client as chat. List/search PRs with `github_search_prs` (`repo` + optional `state`). Writes are egress and need approval when private reads are also allowed. |
+| Jira tools (`jira_get_issue`, `jira_search`, …) | Same `JIRA_*` client as chat. Writes are egress. |
+| Release tools (`wf_release_*`) | Same release engine as chat (`WF_RELEASE_DIR`). Draft → approve → `wf_release_execute_pending` (egress) for staged writes. Workflow JSON lives on the Lambda filesystem under `/tmp`. |
 
 Granted but not connected tools stay off the model until a handler exists. Chat session controls (`confirm_pending`, `think`, …) are not profile permissions.
 

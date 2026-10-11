@@ -18,7 +18,10 @@ import {
   PUSH_URGENCIES,
 } from '../../../../lib/push/payload.js';
 import { sendPushToUser } from '../fcm.js';
+import { GITHUB_TOOLS } from './githubTools.js';
+import { JIRA_TOOLS } from './jiraTools.js';
 import { formatSearchResult, replyLinkFromNotification } from './notificationStore.js';
+import { RELEASE_TOOLS } from './releaseTools.js';
 import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
 import { capText, wrapUntrusted } from './text.js';
 
@@ -517,6 +520,9 @@ export const TOOLS: ToolDef[] = [
       }
     },
   },
+  ...GITHUB_TOOLS,
+  ...JIRA_TOOLS,
+  ...RELEASE_TOOLS,
 ];
 
 for (const tool of PERMISSION_TOOLS) {

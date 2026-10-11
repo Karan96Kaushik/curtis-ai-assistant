@@ -585,6 +585,28 @@ describe('notification store helpers', () => {
     );
     const prompt = buildContext(run({ profile_snapshot: noToolsProfile }));
     assert.equal(/notification_app_stats/.test(prompt[0]?.content ?? ''), false);
+
+    const ghProfile = profile({
+      allowed_tools: ['github_search_prs', 'github_get_pr'],
+      system_prompt: 'Check PRs.',
+    });
+    const ghTools = toModelTools(toolsForProfile(ghProfile)).map((tool) => tool.function.name);
+    assert.ok(ghTools.includes('github_search_prs'));
+    assert.ok(ghTools.includes('github_get_pr'));
+    assert.equal(ghTools.includes('notification_app_stats'), false);
+
+    const jiraRelease = profile({
+      allowed_tools: ['jira_get_issue', 'jira_search', 'wf_release_start', 'wf_release_execute_pending'],
+      system_prompt: 'Release and Jira.',
+    });
+    const jrTools = toModelTools(toolsForProfile(jiraRelease)).map((tool) => tool.function.name);
+    assert.ok(jrTools.includes('jira_get_issue'));
+    assert.ok(jrTools.includes('jira_search'));
+    assert.ok(jrTools.includes('wf_release_start'));
+    assert.ok(jrTools.includes('wf_release_execute_pending'));
+    const executePending = TOOLS.find((tool) => tool.name === 'wf_release_execute_pending');
+    assert.equal(executePending?.egress, true);
+    assert.equal(executePending?.available === false, false);
   });
 });
 
