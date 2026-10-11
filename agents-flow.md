@@ -96,8 +96,11 @@ Turning a write on in the editor also requires approval until that box is cleare
 | `answer` | Resume a run in `waiting_input` |
 | `approval` | `approve` or `deny` a run in `waiting_approval` |
 | `cancel` / `retry` / `save_profile` | As named |
+| `continue` | New run after `done` / `failed` / `cancelled`, with prior outcome + additional instructions |
 | `analyze_profile_run` | LLM-only review of **one** finished run. Returns suggested Instructions. Does not write the profile |
 | `improve_prompt` | Rewrite Instructions for clarity. Result is clamped to at most 2× the source word count. Does not write the profile |
+
+Each step emits a `thought` with the model’s plain-text update, or a synthesized “Working on: …” line when the model only returns tool calls. `finish` and failures both write `result_summary` for the run page.
 
 UI: `/agents`, `/agents/runs/:runId`, `/agents/profiles/new`, `/agents/profiles/:profileId`.
 

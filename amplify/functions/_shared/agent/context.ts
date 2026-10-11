@@ -9,7 +9,8 @@ export const CORE_RULES = [
   'Before search_notifications, call notification_app_stats for the time window so you know which apps are active, then search with app filters.',
   'You cannot send email or WhatsApp. Use draft_reply so the user opens a link and sends it themselves.',
   'Keep the scratchpad updated with the plan, progress, and key IDs.',
-  'Call finish with a short summary when done. Do not loop.',
+  'Each step, write a short plain-text update for the user (what you found or will do next), not only tool calls.',
+  'When done, call finish with a clear user-facing summary of outcomes. Do not loop.',
 ].join(' ');
 
 export const VERBATIM_MESSAGES = 6;

@@ -5,7 +5,42 @@ import { modelToolName, registryToolName, toModelTools, toolAllowed, toolsForPro
 import { preview, redactValue } from './text.js';
 import type { ChatMessage, EventType, ParsedToolCall, RunRecord, StepOutcome, ToolCall } from './types.js';
 
-const NUDGE = 'Use a tool. Call finish() if done or ask_user() if you need input.';
+const NUDGE =
+  'Use a tool. Also write a short plain-text update for the user. Call finish(summary) with a clear outcome when done, or ask_user() if you need input.';
+
+/** User-visible step status from model text and/or tool calls. */
+export function stepFeedback(text: string | null | undefined, calls: ParsedToolCall[]): string {
+  const body = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (body) return preview(body, 800);
+  if (!calls.length) return 'No update from the model this step — nudging it to act.';
+  const parts = calls.map((call) => {
+    const name = registryToolName(call.name);
+    const args = call.args && typeof call.args === 'object' ? (call.args as Record<string, unknown>) : {};
+    const hints: string[] = [];
+    for (const key of ['app', 'sender', 'text', 'hours', 'question', 'summary'] as const) {
+      const value = args[key];
+      if (typeof value === 'string' && value.trim()) hints.push(`${key}=${value.trim().slice(0, 40)}`);
+      else if (typeof value === 'number') hints.push(`${key}=${value}`);
+    }
+    return hints.length ? `${name} (${hints.join(', ')})` : name;
+  });
+  return `Working on: ${parts.join('; ')}.`;
+}
+
+export function finalizeResultSummary(summary: string, run: RunRecord): string {
+  const main = summary.replace(/\s+/g, ' ').trim();
+  if (main.length >= 40) return main.slice(0, 4000);
+  const notes = run.scratchpad.replace(/\s+/g, ' ').trim().slice(0, 600);
+  const rolled = run.summary.replace(/\s+/g, ' ').trim().slice(0, 600);
+  const parts = [main || 'Run finished.', notes ? `Notes: ${notes}` : '', rolled ? `Earlier: ${rolled}` : ''].filter(Boolean);
+  return parts.join(' ').slice(0, 4000);
+}
+
+export function failureResultSummary(error: string, run: RunRecord): string {
+  const notes = run.scratchpad.replace(/\s+/g, ' ').trim().slice(0, 500);
+  const parts = [`Stopped: ${error}`, notes ? `Progress notes: ${notes}` : ''].filter(Boolean);
+  return parts.join(' ').slice(0, 4000);
+}
 
 function patch(run: RunRecord): Partial<RunRecord> {
   return {
@@ -115,7 +150,6 @@ export async function handleStep(
   run.next_attempt_at = null;
   const heartbeat = await rt.store.save(run);
   if (!heartbeat) return { outcome: 'lost_race' };
-  await emit(rt, run.id, 'thought', { text: `Step ${run.step_count + 1}: calling model.` });
 
   const tools = toolsForProfile(profile, rt.tools);
   const prompt = buildContext(run);
@@ -153,15 +187,22 @@ export async function handleStep(
   const source = run.trigger === 'schedule' ? 'schedule' : 'agent';
   await rt.store.addTokens(out.usage.provider, source, out.usage.tokens);
 
+  const calls = out.toolCalls.slice(0, 2);
+  const feedback = stepFeedback(out.text, calls);
+  await emit(rt, run.id, 'thought', {
+    text: feedback,
+    step: run.step_count + 1,
+    provider: out.usage.provider,
+    model: out.usage.model,
+  });
+
   const assistant: ChatMessage = {
     role: 'assistant',
-    content: out.text || null,
-    tool_calls: out.toolCalls.slice(0, 2).map(storedCall),
+    content: out.text?.trim() ? out.text : feedback,
+    tool_calls: calls.map(storedCall),
   };
   run.messages.push(assistant);
-  if (out.text) await emit(rt, run.id, 'thought', { text: preview(out.text, 500) });
 
-  const calls = out.toolCalls.slice(0, 2);
   if (!calls.length) {
     run.no_tool_streak += 1;
     if (run.no_tool_streak >= 2) return fail(rt, run, 'model_not_using_tools', now);
@@ -204,7 +245,7 @@ export async function handleStep(
     }
 
     if (name === 'finish') {
-      return complete(rt, run, String(args.summary), call.id, out.usage, now);
+      return complete(rt, run, finalizeResultSummary(String(args.summary), run), call.id, out.usage, now);
     }
 
     if (name === 'update_scratchpad') {
@@ -285,15 +326,17 @@ async function complete(
   usage: { provider: string; model: string; tokens: number; latencyMs: number },
   now: Date
 ): Promise<StepOutcome> {
+  const result = summary.slice(0, 4000);
   run.messages.push(toolResultMessage(toolCallId, 'finish', 'Finished.'));
-  run.result_summary = summary.slice(0, 4000);
+  run.result_summary = result;
   run.pending_request = null;
   run.finished_at = now.toISOString();
   run.error = null;
   const moved = await rt.store.transition(run.id, ['running'], 'done', patch(run));
   if (!moved) return { outcome: 'lost_race' };
-  await emit(rt, run.id, 'finished', { summary: preview(summary, 500) });
-  await safeNotify(rt, run, 'done', summary);
+  await emit(rt, run.id, 'finished', { summary: result.slice(0, 2000) });
+  await emit(rt, run.id, 'thought', { text: result.slice(0, 800), step: run.step_count + 1, final: true });
+  await safeNotify(rt, run, 'done', result);
   logStep(run, { outcome: 'done', provider: usage.provider, model: usage.model, latency_ms: usage.latencyMs, tokens: usage.tokens });
   return { outcome: 'done' };
 }
@@ -309,12 +352,14 @@ export async function failActiveRun(rt: AgentRuntime, runId: string, err: unknow
 async function fail(rt: AgentRuntime, run: RunRecord, code: string, now: Date): Promise<StepOutcome> {
   const error = code.replace(/\s+/g, ' ').trim().slice(0, 500);
   run.error = error;
+  run.result_summary = failureResultSummary(error, run);
   run.pending_request = null;
   run.finished_at = now.toISOString();
   const from = run.status === 'queued' ? (['queued'] as const) : (['queued', 'running'] as const);
   const moved = await rt.store.transition(run.id, [...from], 'failed', patch(run));
   if (!moved) return { outcome: 'lost_race' };
   await emit(rt, run.id, 'failed', { error });
+  await emit(rt, run.id, 'thought', { text: run.result_summary.slice(0, 800), final: true });
   await safeNotify(rt, run, 'failed', error);
   logStep(run, { outcome: 'failed', error });
   return { outcome: 'failed', error };

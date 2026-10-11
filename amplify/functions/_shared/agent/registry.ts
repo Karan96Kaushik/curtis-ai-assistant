@@ -30,7 +30,11 @@ const askUser = z.object({
 });
 
 const finish = z.object({
-  summary: z.string().min(1).max(2000),
+  summary: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe('Clear summary for the user: what you found, what matters, and any next steps'),
 });
 
 const scratchpad = z.object({
@@ -250,7 +254,8 @@ export const TOOLS: ToolDef[] = [
     integration: 'core',
     access: 'read',
     risk: 'low',
-    description: 'Complete the run with a short summary for the user.',
+    description:
+      'Complete the run. summary must be a clear user-facing write-up of findings and next steps (not just "done").',
     schema: finish,
     maxResultChars: 2000,
     handler: noop,

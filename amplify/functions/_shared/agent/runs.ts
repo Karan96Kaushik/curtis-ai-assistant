@@ -336,3 +336,40 @@ export async function retryRun(rt: AgentRuntime, userId: string, runId: string):
   const run = await ownedRun(rt, userId, runId);
   return createRun(rt, userId, run.command, run.profile_id, 'manual');
 }
+
+/**
+ * Start a new run on the same profile with the previous goal, prior outcome, and new instructions.
+ * Allowed when the prior run is done, failed, or cancelled.
+ */
+export async function continueRun(
+  rt: AgentRuntime,
+  userId: string,
+  runId: string,
+  text: string
+): Promise<RunRecord> {
+  const prev = await ownedRun(rt, userId, runId);
+  if (prev.status !== 'done' && prev.status !== 'failed' && prev.status !== 'cancelled') {
+    throw new AgentInputError('Continue only after the run has stopped.', 409);
+  }
+  const note = text.trim();
+  if (!note || note.length > 4000) throw new AgentInputError('Additional instructions must be 1–4000 characters.');
+
+  const priorBits = [
+    prev.result_summary ? `Previous result:\n${prev.result_summary.slice(0, 1500)}` : '',
+    prev.error && !prev.result_summary ? `Previous error:\n${prev.error}` : '',
+    prev.scratchpad ? `Previous notes:\n${prev.scratchpad.slice(0, 600)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const command = [
+    prev.command.trim(),
+    priorBits ? `---\nContext from previous run (${prev.status}):\n${priorBits}` : '',
+    `---\nAdditional instructions:\n${note}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 4000);
+
+  return createRun(rt, userId, command, prev.profile_id, 'manual');
+}

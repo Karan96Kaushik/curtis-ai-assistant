@@ -6,7 +6,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { answerAgentRun, cancelAgentRun, decideAgentApproval, retryAgentRun } from '@/lib/amplify/agent-functions';
+import {
+  answerAgentRun,
+  cancelAgentRun,
+  continueAgentRun,
+  decideAgentApproval,
+  retryAgentRun,
+} from '@/lib/amplify/agent-functions';
 import { getAgentRun, listAgentEvents, pendingRequest, snapshotLimit, snapshotName } from '@/lib/supabase/agentRuns';
 import type { AgentEventRow, AgentRunRow, AgentRunStatus, Json } from '@/lib/supabase/types';
 import { supabase } from '@/utils/supabase';
@@ -33,13 +39,22 @@ function payloadText(payload: Json, key: string): string {
   }
 }
 
+function payloadFlag(payload: Json, key: string): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  return payload[key] === true;
+}
+
 function EventRow({ event }: { event: AgentEventRow }) {
   if (event.type === 'thought') {
+    const text = payloadText(event.payload, 'text');
+    const step = payloadText(event.payload, 'step');
+    const final = payloadFlag(event.payload, 'final');
+    const label = final ? 'Summary' : step ? `Update · step ${step}` : 'Update';
     return (
-      <details className="rounded-md border px-3 py-2 text-sm">
-        <summary className="cursor-pointer text-muted-foreground">Thought</summary>
-        <p className="mt-2 whitespace-pre-wrap">{payloadText(event.payload, 'text')}</p>
-      </details>
+      <div className={`rounded-md border px-3 py-2 text-sm ${final ? 'border-foreground/20 bg-muted/40' : ''}`}>
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        <p className="mt-1 whitespace-pre-wrap">{text}</p>
+      </div>
     );
   }
   if (event.type === 'tool_call' || event.type === 'tool_result') {
@@ -77,7 +92,16 @@ function EventRow({ event }: { event: AgentEventRow }) {
       </p>
     );
   }
-  if (event.type === 'finished') return null;
+  if (event.type === 'finished') {
+    const summary = payloadText(event.payload, 'summary');
+    if (!summary) return null;
+    return (
+      <div className="rounded-md border border-foreground/20 bg-muted/40 px-3 py-2 text-sm">
+        <p className="text-xs font-medium text-muted-foreground">Finished</p>
+        <p className="mt-1 whitespace-pre-wrap">{summary}</p>
+      </div>
+    );
+  }
   if (event.type === 'failed') {
     return (
       <details open className="rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive">
@@ -116,6 +140,7 @@ export default function RunDetailView() {
   const [reply, setReply] = useState('');
   const [note, setNote] = useState('');
   const [argsText, setArgsText] = useState('');
+  const [followUp, setFollowUp] = useState('');
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -232,6 +257,20 @@ export default function RunDetailView() {
     }
   }
 
+  async function continueWithInstructions() {
+    if (!run || !followUp.trim()) return;
+    setBusy(true);
+    try {
+      const next = await continueAgentRun(run.id, followUp.trim());
+      setFollowUp('');
+      navigate(`/agents/runs/${next.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) return <p className="p-6 text-sm text-muted-foreground">Loading run…</p>;
   if (missing || !run) {
     return (
@@ -247,9 +286,17 @@ export default function RunDetailView() {
   const maxSteps = snapshotLimit(run.profile_snapshot, 'max_steps');
   const budget = snapshotLimit(run.profile_snapshot, 'token_budget');
   const open = run.status === 'queued' || run.status === 'running' || run.status === 'waiting_input' || run.status === 'waiting_approval';
+  const stopped = run.status === 'done' || run.status === 'failed' || run.status === 'cancelled';
   const lastEventAt = events.at(-1)?.created_at ?? run.updated_at;
   const quietMs = Date.now() - Date.parse(lastEventAt);
   const quietRunning = (run.status === 'running' || run.status === 'queued') && Number.isFinite(quietMs) && quietMs > 60_000;
+  const finishedSummary =
+    events
+      .slice()
+      .reverse()
+      .map((event) => (event.type === 'finished' ? payloadText(event.payload, 'summary') : ''))
+      .find(Boolean) ?? '';
+  const resultText = run.result_summary || finishedSummary;
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto px-4 py-6">
@@ -267,7 +314,7 @@ export default function RunDetailView() {
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <Badge variant="outline">{statusLabel(run.status)}</Badge>
         <span>{snapshotName(run.profile_snapshot)}</span>
-        {(run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && (
+        {stopped && (
           <Button asChild variant="link" className="h-auto px-0">
             <Link to={`/agents/profiles/${run.profile_id}?analyzeRun=${run.id}`}>Improve profile from this run</Link>
           </Button>
@@ -295,6 +342,9 @@ export default function RunDetailView() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm whitespace-pre-wrap break-words">{run.error || 'The run failed.'}</p>
+            {run.result_summary && run.result_summary !== run.error && (
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">{run.result_summary}</p>
+            )}
             {events
               .filter((event) => event.type === 'provider_fallback' && payloadText(event.payload, 'detail'))
               .map((event) => (
@@ -307,19 +357,19 @@ export default function RunDetailView() {
               ))}
             <Button size="sm" className="w-fit" disabled={busy} onClick={() => void retry()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
-              Retry
+              Retry same command
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {run.status === 'done' && run.result_summary && (
+      {(run.status === 'done' || Boolean(resultText && stopped)) && resultText && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Result</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{run.result_summary}</p>
+            <p className="text-sm whitespace-pre-wrap">{resultText}</p>
           </CardContent>
         </Card>
       )}
@@ -370,6 +420,29 @@ export default function RunDetailView() {
                 Deny
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {stopped && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Continue with more instructions</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Starts a new run on the same profile, with this run&apos;s goal and outcome as context.
+            </p>
+            <Textarea
+              value={followUp}
+              onChange={(event) => setFollowUp(event.target.value)}
+              placeholder="e.g. Dig into WhatsApp from the last hour and draft a reply to Alex"
+              maxLength={4000}
+            />
+            <Button className="w-fit" disabled={busy || !followUp.trim()} onClick={() => void continueWithInstructions()}>
+              {busy ? <Loader2 className="animate-spin" /> : null}
+              Continue
+            </Button>
           </CardContent>
         </Card>
       )}

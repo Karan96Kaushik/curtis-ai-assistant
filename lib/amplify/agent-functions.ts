@@ -25,6 +25,10 @@ export async function retryAgentRun(id: string): Promise<{ id: string; status: s
   return callFunction('agentApi', { action: 'retry', id });
 }
 
+export async function continueAgentRun(id: string, text: string): Promise<{ id: string; status: string }> {
+  return callFunction('agentApi', { action: 'continue', id, text });
+}
+
 export interface ProfileRunSuggestion {
   rationale: string;
   suggested_system_prompt: string;

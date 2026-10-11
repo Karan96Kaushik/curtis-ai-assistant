@@ -29,9 +29,9 @@ import {
 } from '../amplify/functions/_shared/agent/profileAnalytics.js';
 import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
-import { answerRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
+import { answerRun, continueRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
 import { recoverStaleRuns } from '../amplify/functions/_shared/agent/stall.js';
-import { failActiveRun, handleStep } from '../amplify/functions/_shared/agent/step.js';
+import { failActiveRun, finalizeResultSummary, handleStep, stepFeedback } from '../amplify/functions/_shared/agent/step.js';
 import { capText, wrapUntrusted } from '../amplify/functions/_shared/agent/text.js';
 import type { EmailReader, EnqueueMessage, ModelTurn, ProfileSnapshot, RunRecord, ToolDef } from '../amplify/functions/_shared/agent/types.js';
 
@@ -265,11 +265,19 @@ describe('agent step loop', () => {
 
     const done = await handleStep({ run_id: 'run-1', expected_step: 1 }, harness.rt);
     assert.equal(done.outcome, 'done');
-    assert.ok(eventsOf(harness.store, 'run-1', 'thought').some((event) => String(event.payload.text).includes('calling model')));
+    assert.ok(
+      eventsOf(harness.store, 'run-1', 'thought').some(
+        (event) =>
+          String(event.payload.text).includes('Working on:') ||
+          String(event.payload.text).includes('Need a mailbox') ||
+          String(event.payload.text).includes('One invoice')
+      )
+    );
     const finished = await harness.store.loadRun('run-1');
     assert.equal(finished?.status, 'done');
     assert.equal(finished?.result_summary, 'One invoice from Gmail.');
     assert.equal(eventsOf(harness.store, 'run-1', 'finished').length, 1);
+    assert.ok(eventsOf(harness.store, 'run-1', 'thought').some((event) => event.payload.final === true));
   });
 
   it('blocks a tool the profile does not allow', async () => {
@@ -777,6 +785,38 @@ describe('profiles', () => {
 
     const started = await createRun(rt, 'user-1', 'Check notifications');
     assert.equal(started.profile_id, second.id);
+  });
+});
+
+describe('user-facing step feedback', () => {
+  it('builds thought text from tools when the model returns no content', () => {
+    assert.match(
+      stepFeedback(null, [{ id: '1', name: 'search_notifications', args: { app: 'WhatsApp', hours: 3 } }]),
+      /Working on: search_notifications \(app=WhatsApp, hours=3\)/
+    );
+    assert.match(stepFeedback('Looking at mail.', []), /Looking at mail/);
+    assert.match(
+      finalizeResultSummary('ok', run({ scratchpad: 'Checked WhatsApp; two unread from Alex.' })),
+      /Checked WhatsApp/
+    );
+  });
+
+  it('continues a finished run with additional instructions', async () => {
+    const harness = scripted([]);
+    await harness.store.insertRun(
+      run({
+        status: 'done',
+        result_summary: 'Found two WhatsApp pings.',
+        command: 'Triage notifications.',
+      })
+    );
+    const next = await continueRun(harness.rt, 'user-1', 'run-1', 'Draft a reply to Alex.');
+    assert.notEqual(next.id, 'run-1');
+    assert.equal(next.status, 'queued');
+    assert.match(next.command, /Triage notifications/);
+    assert.match(next.command, /Found two WhatsApp pings/);
+    assert.match(next.command, /Draft a reply to Alex/);
+    await assert.rejects(() => continueRun(harness.rt, 'user-1', 'run-1', ''));
   });
 });
 
