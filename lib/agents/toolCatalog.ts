@@ -50,11 +50,22 @@ export const INTEGRATION_LABEL: Record<PermissionIntegration, string> = {
  */
 export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   {
+    name: 'notification_app_stats',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description:
+      'Per-app notification counts for a time window. Call this before searching so you know which apps are active.',
+    connected: true,
+    privateRead: true,
+  },
+  {
     name: 'search_notifications',
     integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'Search phone notification previews by app, sender, text, and time. Results are truncated previews, not full messages.',
+    description:
+      'Search phone notification previews by app, sender, text, category, and time (hours or since/until). Default 7-day window, up to 40 results. Truncated previews, not full messages.',
     connected: true,
     privateRead: true,
   },
@@ -196,6 +207,7 @@ export const INTEGRATION_ORDER: readonly PermissionIntegration[] = [
 
 /** Default Inbox tools: notification triage only. */
 export const INBOX_TOOLS: readonly string[] = [
+  'notification_app_stats',
   'search_notifications',
   'notification_digest',
   'get_notification',

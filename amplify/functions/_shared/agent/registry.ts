@@ -20,13 +20,40 @@ const scratchpad = z.object({
   text: z.string().max(800),
 });
 
-const searchNotifications = z.object({
-  app: z.string().max(80).optional(),
-  sender: z.string().max(120).optional(),
-  text: z.string().max(200).optional(),
-  since: z.string().max(40).optional(),
-  until: z.string().max(40).optional(),
-  limit: z.number().int().min(1).max(20).optional(),
+const searchFilters = {
+  app: z
+    .string()
+    .max(80)
+    .optional()
+    .describe('App name or package fragment, e.g. WhatsApp, Gmail, com.whatsapp'),
+  exclude_app: z.string().max(80).optional().describe('Omit this app or package from results'),
+  sender: z.string().max(120).optional().describe('Notification title or chat/sender name'),
+  text: z.string().max(200).optional().describe('Substring in title or body'),
+  category: z.string().max(40).optional().describe('Android category fragment, e.g. msg, email, promo'),
+  since: z.string().max(40).optional().describe('ISO start time. Default is 7 days ago (or hours, if set)'),
+  until: z.string().max(40).optional().describe('ISO end time. Default is now'),
+  hours: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .optional()
+    .describe('Look back this many hours (1–168). Used when since is omitted'),
+  limit: z.number().int().min(1).max(40).optional().describe('Max results, 1–40. Default 20'),
+};
+
+const searchNotifications = z.object(searchFilters);
+
+const notificationAppStats = z.object({
+  hours: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .optional()
+    .describe('Look back this many hours (1–168). Default 24 when since is omitted'),
+  since: z.string().max(40).optional().describe('ISO start time'),
+  until: z.string().max(40).optional().describe('ISO end time. Default is now'),
 });
 
 const notificationDigest = z.object({
@@ -39,13 +66,8 @@ const getNotification = z.object({
 });
 
 const getMore = z.object({
-  offset: z.number().int().min(0).max(500),
-  app: z.string().max(80).optional(),
-  sender: z.string().max(120).optional(),
-  text: z.string().max(200).optional(),
-  since: z.string().max(40).optional(),
-  until: z.string().max(40).optional(),
-  limit: z.number().int().min(1).max(20).optional(),
+  offset: z.number().int().min(0).max(2000).describe('Skip this many matches from a previous search'),
+  ...searchFilters,
 });
 
 const draftReply = z.object({
@@ -128,13 +150,29 @@ export const TOOLS: ToolDef[] = [
     handler: noop,
   },
   {
+    name: 'notification_app_stats',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description:
+      'Per-app notification counts for a time window (hours, or since/until). Default last 24 hours. Call this before search_notifications to see which apps are active.',
+    schema: notificationAppStats,
+    maxResultChars: 2500,
+    handler: async (args, ctx) => {
+      const parsed = notificationAppStats.parse(args);
+      const result = await ctx.notifications.appStats(ctx.userId, ctx.allowedApps, parsed, ctx.now);
+      return { text: result.text };
+    },
+  },
+  {
     name: 'search_notifications',
     integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'Search phone notification previews by app, sender, text, and time. Not full messages.',
+    description:
+      'Search phone notification previews. Call notification_app_stats first unless you already have counts for this window. Filter by app, exclude_app, sender, text, category, since/until or hours (1–168). Default window is 7 days, default limit 20, max 40. Not full messages.',
     schema: searchNotifications,
-    maxResultChars: 2500,
+    maxResultChars: 6000,
     handler: async (args, ctx) => {
       const parsed = searchNotifications.parse(args);
       const result = await ctx.notifications.search(ctx.userId, ctx.allowedApps, parsed, ctx.now);
@@ -197,9 +235,9 @@ export const TOOLS: ToolDef[] = [
     integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'Fetch the next page of a previous search_notifications query.',
+    description: 'Fetch the next page of a previous search_notifications query. Pass the same filters plus offset.',
     schema: getMore,
-    maxResultChars: 2500,
+    maxResultChars: 6000,
     handler: async (args, ctx) => {
       const parsed = getMore.parse(args);
       const result = await ctx.notifications.search(
@@ -207,10 +245,13 @@ export const TOOLS: ToolDef[] = [
         ctx.allowedApps,
         {
           app: parsed.app,
+          exclude_app: parsed.exclude_app,
           sender: parsed.sender,
           text: parsed.text,
+          category: parsed.category,
           since: parsed.since,
           until: parsed.until,
+          hours: parsed.hours,
           limit: parsed.limit,
           offset: parsed.offset,
         },

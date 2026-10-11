@@ -33,7 +33,7 @@ A schedule uses the same run. `scheduleTick` claims a due job and invokes `runSc
 | `notifications` table | Truncated lock-screen previews: app, title/sender, snippet or stored body |
 | Not available | Full email bodies, WhatsApp threads, send credentials |
 
-Core rules tell the model that notifications are previews, not full messages, and that summary/scratchpad may be derived from that untrusted data. OTP codes, card numbers, and password-reset links are redacted in the tool layer before they reach a provider.
+Core rules tell the model that notifications are previews, not full messages, that summary/scratchpad may be derived from that untrusted data, and to call `notification_app_stats` before `search_notifications`. OTP codes, card numbers, and password-reset links are redacted in the tool layer before they reach a provider.
 
 Every notification tool returns a coverage note from the newest `notifications` row, for example `newest stored notification 3 min ago`. The phone writes those rows directly. `device_tokens` is only for outbound FCM and is not a sign that notification capture is healthy. A quiet window is not reported as a down listener or an offline phone.
 
@@ -41,7 +41,8 @@ Every notification tool returns a coverage note from the newest `notifications` 
 
 | Tool | Purpose |
 | --- | --- |
-| `search_notifications(app?, sender?, text?, since?, until?, limit<=15)` | Targeted reads. Dedupes repeated pings from the same chat |
+| `notification_app_stats(hours 1–168?, since?, until?)` | Per-app counts for a duration. Default last 24 hours. Call this before searching |
+| `search_notifications(app?, exclude_app?, sender?, text?, category?, since?, until?, hours 1–168, limit<=40)` | Targeted reads. Default 7-day window, default limit 20. Dedupes repeated pings from the same chat |
 | `notification_digest(since, group_by: app\|sender)` | Counts and top senders in a few hundred tokens |
 | `get_notification(id)` | Full stored text of one item (still a preview, still redacted) |
 | `list_notification_apps()` | Apps this profile may query |

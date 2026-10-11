@@ -11,7 +11,7 @@ export const PRIVATE_READ_TOOLS = new Set(
 /** Old messaging tool names → current notification tools. */
 const LEGACY_TOOL_MAP: Record<string, readonly string[]> = {
   request_phone_notifications: INBOX_TOOLS.filter((name) => name !== 'draft_reply'),
-  'email.list': ['search_notifications', 'notification_digest', 'list_notification_apps'],
+  'email.list': ['notification_app_stats', 'search_notifications', 'notification_digest', 'list_notification_apps'],
   'email.get': ['get_notification', 'get_more'],
   'push.send': ['send_push_notification'],
 };
@@ -34,6 +34,9 @@ export function normalizeAllowedTools(tools: readonly string[]): string[] {
       seen.add(tool);
       out.push(tool);
     }
+  }
+  if (seen.has('search_notifications') && !seen.has('notification_app_stats')) {
+    out.unshift('notification_app_stats');
   }
   return out;
 }
@@ -175,7 +178,7 @@ export function inboxProfileDraft(): ProfileDraft {
     name: 'Inbox',
     description: 'Reads phone notification previews. Cannot send messages. Banking and OTP apps stay hidden until listed.',
     system_prompt:
-      'You triage the user\'s recent phone notifications. They are truncated previews, not full messages — say so when it matters. Summarize what needs attention and finish with a short summary. Ask when a choice is ambiguous. Use draft_reply when the user should send something themselves.',
+      'You triage the user\'s recent phone notifications. They are truncated previews, not full messages — say so when it matters. Call notification_app_stats for the time window before search_notifications, then search the apps that matter. Summarize what needs attention and finish with a short summary. Ask when a choice is ambiguous. Use draft_reply when the user should send something themselves.',
     allowed_tools: [...INBOX_TOOLS],
     approval_required: [],
     allowed_apps: [],

@@ -3,15 +3,19 @@ import { describe, it } from 'node:test';
 import { z } from 'zod';
 import { apiModelId, chainFromModelIds } from '../lib/agents/modelChain.js';
 import { INBOX_TOOLS, PERMISSION_TOOLS } from '../lib/agents/toolCatalog.js';
-import { buildContext, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
+import { buildContext, CORE_RULES, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
 import type { AgentRuntime } from '../amplify/functions/_shared/agent/deps.js';
 import { executeTool } from '../amplify/functions/_shared/agent/execute.js';
 import { eventsOf, MemoryAgentStore } from '../amplify/functions/_shared/agent/memoryStore.js';
 import {
   appAllowed,
+  filterNotificationRows,
+  formatAppStats,
   formatSearchResult,
   redactSensitive,
   replyLinkFromNotification,
+  searchWindow,
+  statsWindow,
   type NotificationStore,
 } from '../amplify/functions/_shared/agent/notificationStore.js';
 import { egressToolNames, ensureEgressApproval, normalizeAllowedTools, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
@@ -107,6 +111,15 @@ function memoryNotifications(items: { id: string; app: string; sender: string; s
     async digest() {
       return {
         text: 'Coverage: ok\nDigest (1 unique previews, grouped by app):\n1 · Gmail\nThese are notification previews, not full messages.',
+        coverage: { text: 'Coverage: ok', stale: false, lastDataAt: NOW.toISOString(), lastDeviceSyncAt: NOW.toISOString() },
+      };
+    },
+    async appStats() {
+      const counts = new Map<string, number>();
+      for (const item of items) counts.set(item.app, (counts.get(item.app) ?? 0) + 1);
+      const ranked = [...counts.entries()].map(([name, count]) => `${count} · ${name}`);
+      return {
+        text: `Coverage: ok\nPer-app counts:\n${ranked.join('\n') || 'none'}`,
         coverage: { text: 'Coverage: ok', stale: false, lastDataAt: NOW.toISOString(), lastDeviceSyncAt: NOW.toISOString() },
       };
     },
@@ -399,6 +412,7 @@ describe('profile rules', () => {
   it('maps legacy phone tools and requires approval for schedule_task', () => {
     const tools = normalizeAllowedTools(['request_phone_notifications', 'schedule_task']);
     assert.ok(tools.includes('search_notifications'));
+    assert.ok(tools.includes('notification_app_stats'));
     assert.ok(tools.includes('schedule_task'));
     assert.equal(tools.includes('request_phone_notifications'), false);
     assert.deepEqual(ensureEgressApproval(tools, []), ['schedule_task']);
@@ -486,6 +500,60 @@ describe('notification store helpers', () => {
     );
     assert.match(formatted, /previews/i);
     assert.match(formatted, /get_more/);
+
+    const rows = [
+      {
+        id: 1,
+        app_name: 'WhatsApp',
+        package_name: 'com.whatsapp',
+        title: 'Alex',
+        text: 'Dinner?',
+        sub_text: null,
+        big_text: null,
+        category: 'msg',
+      },
+      {
+        id: 2,
+        app_name: 'Gmail',
+        package_name: 'com.google.android.gm',
+        title: 'billing@acme.test',
+        text: 'Invoice',
+        sub_text: null,
+        big_text: null,
+        category: 'email',
+      },
+    ];
+    assert.equal(filterNotificationRows(rows, [], { app: 'gmail' }).map((row) => row.id).join(), '2');
+    assert.equal(filterNotificationRows(rows, [], { exclude_app: 'whatsapp' }).map((row) => row.id).join(), '2');
+    assert.equal(filterNotificationRows(rows, [], { sender: 'alex' }).map((row) => row.id).join(), '1');
+    assert.equal(filterNotificationRows(rows, [], { text: 'invoice' }).map((row) => row.id).join(), '2');
+    assert.equal(filterNotificationRows(rows, [], { category: 'msg' }).map((row) => row.id).join(), '1');
+    const window = searchWindow({ hours: 3 }, NOW);
+    assert.equal(window.untilMs, NOW.getTime());
+    assert.equal(window.sinceMs, NOW.getTime() - 3 * 60 * 60_000);
+    const week = searchWindow({}, NOW);
+    assert.equal(week.sinceMs, NOW.getTime() - 7 * 24 * 60 * 60_000);
+    const searchTool = toModelTools(toolsForProfile(profile())).find((tool) => tool.function.name === 'search_notifications');
+    const limitSchema = (searchTool?.function.parameters as { properties?: { limit?: { maximum?: number } } }).properties?.limit;
+    assert.equal(limitSchema?.maximum, 40);
+
+    const stats = formatAppStats(
+      [rows[0], rows[0], rows[1]],
+      { text: 'Coverage: ok', stale: false, lastDataAt: null, lastDeviceSyncAt: null },
+      NOW.getTime() - 24 * 60 * 60_000,
+      NOW.getTime()
+    );
+    assert.match(stats, /2 · WhatsApp/);
+    assert.match(stats, /1 · Gmail/);
+    assert.match(stats, /search_notifications/);
+    const day = statsWindow({}, NOW);
+    assert.equal(day.sinceMs, NOW.getTime() - 24 * 60 * 60_000);
+    assert.ok(INBOX_TOOLS.includes('notification_app_stats'));
+    assert.match(CORE_RULES, /notification_app_stats/);
+    assert.equal(
+      toModelTools(toolsForProfile(profile())).some((tool) => tool.function.name === 'notification_app_stats'),
+      true
+    );
   });
 });
 

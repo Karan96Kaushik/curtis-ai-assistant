@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const LOOKUP_TIMEOUT_MS = 8_000;
-const MAX_SEARCH = 20;
+const MAX_SEARCH = 40;
+const DEFAULT_SEARCH = 20;
+const MAX_FETCH = 500;
+const DEFAULT_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
 const MAX_BODY = 600;
 
 /** Banking, OTP, and authenticator apps stay hidden unless a profile lists them in allowed_apps. */
@@ -39,10 +42,13 @@ export interface CoverageNote {
 
 export interface SearchQuery {
   app?: string;
+  exclude_app?: string;
   sender?: string;
   text?: string;
+  category?: string;
   since?: string;
   until?: string;
+  hours?: number;
   limit?: number;
   offset?: number;
 }
@@ -54,6 +60,12 @@ export interface NotificationStore {
     allowedApps: string[],
     since: string,
     groupBy: 'app' | 'sender',
+    now: Date
+  ): Promise<{ text: string; coverage: CoverageNote }>;
+  appStats(
+    userId: string,
+    allowedApps: string[],
+    query: Pick<SearchQuery, 'hours' | 'since' | 'until'>,
     now: Date
   ): Promise<{ text: string; coverage: CoverageNote }>;
   get(userId: string, allowedApps: string[], id: string, now: Date): Promise<{ item: NotificationItem | null; body: string; coverage: CoverageNote }>;
@@ -133,6 +145,45 @@ function parseBound(raw: string | undefined, fallback: number): number {
   if (!raw?.trim()) return fallback;
   const ms = Date.parse(raw);
   return Number.isFinite(ms) ? ms : fallback;
+}
+
+export function statsWindow(query: Pick<SearchQuery, 'hours' | 'since' | 'until'>, now: Date): { sinceMs: number; untilMs: number } {
+  if (query.since?.trim() || query.hours != null) return searchWindow(query, now);
+  return searchWindow({ ...query, hours: 24 }, now);
+}
+
+export function formatAppStats(
+  rows: NotificationRow[],
+  coverage: CoverageNote,
+  sinceMs: number,
+  untilMs: number
+): string {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = (row.app_name || row.package_name || 'App').trim() || 'App';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const hours = Math.max(1, Math.round((untilMs - sinceMs) / 3_600_000));
+  const lines = [
+    formatCoverage(coverage),
+    `Per-app counts for ${hours}h (${new Date(sinceMs).toISOString()} – ${new Date(untilMs).toISOString()}, ${rows.length} unique previews):`,
+    ...ranked.map(([name, count]) => `${count} · ${redactSensitive(name)}`),
+  ];
+  if (!ranked.length) lines.push('No notifications in this window.');
+  lines.push('Use these counts to pick app filters, then call search_notifications.');
+  return lines.join('\n');
+}
+
+export function searchWindow(query: SearchQuery, now: Date): { sinceMs: number; untilMs: number } {
+  const untilMs = parseBound(query.until, now.getTime());
+  const hours =
+    typeof query.hours === 'number' && Number.isFinite(query.hours)
+      ? Math.min(168, Math.max(1, Math.round(query.hours)))
+      : null;
+  const defaultLookback = hours != null && !query.since?.trim() ? hours * 60 * 60_000 : DEFAULT_LOOKBACK_MS;
+  const sinceMs = parseBound(query.since, untilMs - defaultLookback);
+  return { sinceMs: Math.min(sinceMs, untilMs), untilMs };
 }
 
 function dedupeKey(row: NotificationRow): string {
@@ -256,7 +307,7 @@ async function fetchWindow(
       .gte('posted_at', sinceMs)
       .lte('posted_at', untilMs)
       .order('posted_at', { ascending: false })
-      .limit(Math.min(200, Math.max(limit * 4, 40)))
+      .limit(Math.min(MAX_FETCH, Math.max(limit, 40)))
       .abortSignal(controller.signal);
     if (!posted.error) return (posted.data ?? []) as NotificationRow[];
     if (!/posted_at/i.test(posted.error.message)) throw new Error('Could not read notifications');
@@ -267,7 +318,7 @@ async function fetchWindow(
       .gte('created_at', sinceMs)
       .lte('created_at', untilMs)
       .order('created_at', { ascending: false })
-      .limit(Math.min(200, Math.max(limit * 4, 40)))
+      .limit(Math.min(MAX_FETCH, Math.max(limit, 40)))
       .abortSignal(controller.signal);
     if (created.error) throw new Error('Could not read notifications');
     return (created.data ?? []) as NotificationRow[];
@@ -276,21 +327,31 @@ async function fetchWindow(
   }
 }
 
-function filterRows(rows: NotificationRow[], allowedApps: string[], query: SearchQuery): NotificationRow[] {
+export function filterNotificationRows(
+  rows: NotificationRow[],
+  allowedApps: string[],
+  query: SearchQuery
+): NotificationRow[] {
   const appNeedle = query.app?.trim().toLowerCase();
+  const excludeNeedle = query.exclude_app?.trim().toLowerCase();
   const senderNeedle = query.sender?.trim().toLowerCase();
   const textNeedle = query.text?.trim().toLowerCase();
+  const categoryNeedle = query.category?.trim().toLowerCase();
   const seen = new Set<string>();
   const out: NotificationRow[] = [];
   for (const row of rows) {
     const app = (row.app_name || '').trim();
     const pkg = (row.package_name || '').trim();
+    const appHay = `${app} ${pkg}`.toLowerCase();
     if (!appAllowed(app, pkg, allowedApps)) continue;
-    if (appNeedle && !`${app} ${pkg}`.toLowerCase().includes(appNeedle)) continue;
+    if (appNeedle && !appHay.includes(appNeedle)) continue;
+    if (excludeNeedle && appHay.includes(excludeNeedle)) continue;
     const title = (row.title || '').toLowerCase();
     const body = bodyOf(row).toLowerCase();
+    const category = (row.category || '').toLowerCase();
     if (senderNeedle && !title.includes(senderNeedle)) continue;
     if (textNeedle && !`${title} ${body}`.includes(textNeedle)) continue;
+    if (categoryNeedle && !category.includes(categoryNeedle)) continue;
     const key = dedupeKey(row);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -302,11 +363,12 @@ function filterRows(rows: NotificationRow[], allowedApps: string[], query: Searc
 export function supabaseNotificationStore(db: SupabaseClient): NotificationStore {
   return {
     async search(userId, allowedApps, query, now) {
-      const untilMs = parseBound(query.until, now.getTime());
-      const sinceMs = parseBound(query.since, untilMs - 24 * 60 * 60_000);
-      const limit = Math.min(MAX_SEARCH, Math.max(1, query.limit ?? 10));
+      const { sinceMs, untilMs } = searchWindow(query, now);
+      const limit = Math.min(MAX_SEARCH, Math.max(1, query.limit ?? DEFAULT_SEARCH));
       const offset = Math.max(0, query.offset ?? 0);
-      const rows = filterRows(await fetchWindow(db, userId, sinceMs, untilMs, limit + offset + 5), allowedApps, query);
+      const filtered = Boolean(query.app || query.exclude_app || query.sender || query.text || query.category);
+      const fetchLimit = Math.min(MAX_FETCH, offset + limit + (filtered ? 200 : 20));
+      const rows = filterNotificationRows(await fetchWindow(db, userId, sinceMs, untilMs, fetchLimit), allowedApps, query);
       const page = rows.slice(offset, offset + limit);
       const items = page.map(toItem).filter((item): item is NotificationItem => item != null);
       const coverage = await loadCoverage(db, userId, now, rows);
@@ -314,9 +376,20 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
       return { items, coverage, nextOffset };
     },
 
+    async appStats(userId, allowedApps, query, now) {
+      const { sinceMs, untilMs } = statsWindow(query, now);
+      const rows = filterNotificationRows(
+        await fetchWindow(db, userId, sinceMs, untilMs, MAX_FETCH),
+        allowedApps,
+        {}
+      );
+      const coverage = await loadCoverage(db, userId, now, rows);
+      return { text: formatAppStats(rows, coverage, sinceMs, untilMs), coverage };
+    },
+
     async digest(userId, allowedApps, since, groupBy, now) {
       const sinceMs = parseBound(since, now.getTime() - 24 * 60 * 60_000);
-      const rows = filterRows(await fetchWindow(db, userId, sinceMs, now.getTime(), 80), allowedApps, {});
+      const rows = filterNotificationRows(await fetchWindow(db, userId, sinceMs, now.getTime(), 80), allowedApps, {});
       const counts = new Map<string, number>();
       for (const row of rows) {
         const key =
@@ -359,7 +432,7 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
 
     async listApps(userId, allowedApps, now) {
       const sinceMs = now.getTime() - 7 * 24 * 60 * 60_000;
-      const rows = filterRows(await fetchWindow(db, userId, sinceMs, now.getTime(), 100), allowedApps, {});
+      const rows = filterNotificationRows(await fetchWindow(db, userId, sinceMs, now.getTime(), 100), allowedApps, {});
       const apps = [...new Set(rows.map((row) => (row.app_name || row.package_name || 'App').trim()))].sort();
       const coverage = await loadCoverage(db, userId, now, rows);
       return { apps, coverage };
