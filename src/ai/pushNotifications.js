@@ -3,18 +3,19 @@
  *
  * The Amplify chat runtime injects the real sender (service-role Supabase + FCM).
  * Discord and local CLI leave this unconfigured; the tool then reports unavailable.
+ *
+ * Rich fields are passed through; Amplify `sendPushToUser` / `normalizePushPayload`
+ * apply the canonical contract (see lib/push/payload.ts and
+ * context/android-push-notifications-spec.md).
  */
 
 const TOOL_NAME = 'send_push_notification';
 
 const MAX_TITLE_CHARS = 120;
 const MAX_BODY_CHARS = 1000;
-const MAX_DATA_KEYS = 20;
-const MAX_DATA_KEY_CHARS = 80;
-const MAX_DATA_VALUE_CHARS = 500;
 
 /**
- * @typedef {{ title: string, body: string, data?: Record<string, string> }} PushPayload
+ * @typedef {import('../../lib/push/payload').PushPayloadInput} PushPayload
  * @typedef {{ sent: number, failed: number, removed: number }} PushSendResult
  * @typedef {(userId: string, payload: PushPayload) => Promise<PushSendResult>} PushSender
  */
@@ -32,6 +33,7 @@ function isConfigured() {
 }
 
 /**
+ * Light pre-check for title/body; rich fields pass through for server normalize.
  * @param {unknown} raw
  * @returns {{ ok: true, payload: PushPayload } | { ok: false, message: string }}
  */
@@ -52,32 +54,9 @@ function normalizePayload(raw) {
     return { ok: false, message: `body must be at most ${MAX_BODY_CHARS} characters` };
   }
 
-  /** @type {Record<string, string> | undefined} */
-  let data;
-  if (body.data != null) {
-    if (typeof body.data !== 'object' || Array.isArray(body.data)) {
-      return { ok: false, message: 'data must be an object of string values' };
-    }
-    data = {};
-    const entries = Object.entries(/** @type {Record<string, unknown>} */ (body.data));
-    if (entries.length > MAX_DATA_KEYS) {
-      return { ok: false, message: `data can include at most ${MAX_DATA_KEYS} keys` };
-    }
-    for (const [key, value] of entries) {
-      if (key.length > MAX_DATA_KEY_CHARS) {
-        return { ok: false, message: `data key "${key.slice(0, 40)}…" is too long` };
-      }
-      if (value == null) continue;
-      const str = String(value);
-      if (str.length > MAX_DATA_VALUE_CHARS) {
-        return { ok: false, message: `data value for "${key}" is too long` };
-      }
-      data[key] = str;
-    }
-    if (!Object.keys(data).length) data = undefined;
-  }
-
-  return { ok: true, payload: { title, body: text, data } };
+  /** @type {PushPayload} */
+  const payload = { ...body, title, body: text };
+  return { ok: true, payload };
 }
 
 /**

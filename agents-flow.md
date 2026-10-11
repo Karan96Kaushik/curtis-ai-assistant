@@ -144,7 +144,7 @@ When the estimate exceeds 60% of usable context (8000 for Google-first, else 600
 | `ask_user` / `finish` / `update_scratchpad` | Always on |
 | Notification tools above | Read/filter/redact from `notifications` |
 | `draft_reply` | Push + run-page link; user sends |
-| `send_push_notification` | FCM to own devices |
+| `send_push_notification` | Rich FCM to own devices (title/body + channel, key, deep link, actions, progress). Android contract: `context/android-push-notifications-spec.md` |
 | `schedule_task` / `list_schedules` / `cancel_schedule` | Agent schedules on this profile |
 
 Granted but not connected tools stay off the model until a handler exists. Chat session controls (`confirm_pending`, `think`, …) are not profile permissions.

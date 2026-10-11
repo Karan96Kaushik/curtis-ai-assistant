@@ -1,5 +1,22 @@
 import { z } from 'zod';
 import { PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
+import {
+  MAX_ACTIONS,
+  MAX_ACTION_LABEL_CHARS,
+  MAX_BODY_CHARS,
+  MAX_DEEP_LINK_CHARS,
+  MAX_EXPANDED_BODY_CHARS,
+  MAX_KEY_CHARS,
+  MAX_SHORT_CRITICAL_CHARS,
+  MAX_SUBTITLE_CHARS,
+  MAX_TITLE_CHARS,
+  MAX_URL_CHARS,
+  PUSH_ACTION_IDS,
+  PUSH_CATEGORIES,
+  PUSH_CHANNELS,
+  PUSH_STYLES,
+  PUSH_URGENCIES,
+} from '../../../../lib/push/payload.js';
 import { sendPushToUser } from '../fcm.js';
 import { formatSearchResult, replyLinkFromNotification } from './notificationStore.js';
 import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
@@ -76,8 +93,107 @@ const draftReply = z.object({
 });
 
 const pushSend = z.object({
-  title: z.string().min(1).max(120),
-  body: z.string().min(1).max(500),
+  title: z.string().min(1).max(MAX_TITLE_CHARS).describe('Short lock-screen title'),
+  body: z.string().min(1).max(MAX_BODY_CHARS).describe('Primary notification text'),
+  subtitle: z
+    .string()
+    .max(MAX_SUBTITLE_CHARS)
+    .optional()
+    .describe('Header subtext, e.g. Jira · PROJ-123'),
+  expanded_body: z
+    .string()
+    .max(MAX_EXPANDED_BODY_CHARS)
+    .optional()
+    .describe('Longer text shown when the shade expands (BigText)'),
+  category: z
+    .enum(PUSH_CATEGORIES)
+    .optional()
+    .describe('Semantic category for Android CATEGORY_* mapping'),
+  channel: z
+    .enum(PUSH_CHANNELS)
+    .optional()
+    .describe('Notification channel: urgent, default, digest, progress, quiet'),
+  urgency: z
+    .enum(PUSH_URGENCIES)
+    .optional()
+    .describe('Interrupt level. Prefer channel when both are set'),
+  silent: z.boolean().optional().describe('Post without sound/heads-up (digests)'),
+  notification_key: z
+    .string()
+    .min(1)
+    .max(MAX_KEY_CHARS)
+    .optional()
+    .describe('Stable id so later pushes replace this alert instead of stacking'),
+  group_key: z
+    .string()
+    .min(1)
+    .max(MAX_KEY_CHARS)
+    .optional()
+    .describe('Bundle related alerts in the shade'),
+  deep_link: z
+    .string()
+    .min(1)
+    .max(MAX_DEEP_LINK_CHARS)
+    .optional()
+    .describe('App path or URL to open on tap, e.g. /agents/runs/{id}'),
+  image_url: z
+    .string()
+    .max(MAX_URL_CHARS)
+    .optional()
+    .describe('https image for BigPicture / expanded media'),
+  large_icon_url: z
+    .string()
+    .max(MAX_URL_CHARS)
+    .optional()
+    .describe('https URL for large icon / avatar'),
+  related_notification_id: z
+    .string()
+    .min(1)
+    .max(40)
+    .optional()
+    .describe('Inbound phone notification id this alert refers to'),
+  when: z.string().max(40).optional().describe('ISO time shown / sort key for the event'),
+  expires_at: z.string().max(40).optional().describe('ISO time after which the app should auto-dismiss'),
+  only_alert_once: z
+    .boolean()
+    .optional()
+    .describe('Update content without re-buzzing (default true when notification_key set)'),
+  style: z
+    .enum(PUSH_STYLES)
+    .optional()
+    .describe('default | big_text | big_picture | progress'),
+  progress: z
+    .object({
+      current: z.number().int().min(0).max(10_000),
+      max: z.number().int().min(1).max(10_000),
+      indeterminate: z.boolean().optional(),
+    })
+    .optional()
+    .describe('Required when style is progress'),
+  short_critical_text: z
+    .string()
+    .max(MAX_SHORT_CRITICAL_CHARS)
+    .optional()
+    .describe('Short status-bar chip text for Live Updates (Android 16)'),
+  ongoing: z.boolean().optional().describe('Ongoing / sticky notification (progress journeys)'),
+  request_promoted: z
+    .boolean()
+    .optional()
+    .describe('Request Live Update promotion (requires ongoing; Android 16+)'),
+  actions: z
+    .array(
+      z.object({
+        id: z.enum(PUSH_ACTION_IDS),
+        label: z.string().min(1).max(MAX_ACTION_LABEL_CHARS),
+      })
+    )
+    .max(MAX_ACTIONS)
+    .optional()
+    .describe('Up to 3 action buttons (open, snooze, mark_done, open_draft, view_issue)'),
+  data: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Optional extra string map for the app (do not use curtis_* keys)'),
 });
 
 const scheduleTask = z.object({
@@ -283,7 +399,18 @@ export const TOOLS: ToolDef[] = [
         await sendPushToUser(ctx.userId, {
           title: 'Draft reply ready',
           body: preview,
-          data: { link: link.link, run_id: ctx.runId, notification_id: String(row.id), channel: link.channel },
+          subtitle: link.channel,
+          category: 'msg',
+          channel: 'default',
+          urgency: 'normal',
+          notification_key: `draft:${row.id}`,
+          deep_link: link.link,
+          related_notification_id: String(row.id),
+          actions: [
+            { id: 'open_draft', label: 'Open draft' },
+            { id: 'open', label: 'Open run' },
+          ],
+          data: { link: link.link, run_id: ctx.runId, notification_id: String(row.id), reply_channel: link.channel },
         });
       } catch {
         // Draft still returned in the tool result for the run page.
@@ -298,12 +425,15 @@ export const TOOLS: ToolDef[] = [
     integration: 'push',
     access: 'write',
     risk: 'low',
-    description: 'Send a push notification to this user\'s Android app.',
+    description:
+      'Send a push to this user\'s Android app. Prefer a short title, useful body, and a stable notification_key so updates replace prior alerts. ' +
+      'Use channel/urgency for interrupt level, deep_link to open the right screen, optional actions (Open/Snooze/Done), and style progress only for ongoing work. ' +
+      'Do not spam: one key per event; update instead of stacking.',
     schema: pushSend,
     maxResultChars: 200,
     handler: async (args, ctx) => {
       const parsed = pushSend.parse(args);
-      const result = await sendPushToUser(ctx.userId, { title: parsed.title, body: parsed.body });
+      const result = await sendPushToUser(ctx.userId, parsed);
       return { text: result.sent ? `Push sent to ${result.sent} device(s).` : 'No devices are registered for push.' };
     },
   },

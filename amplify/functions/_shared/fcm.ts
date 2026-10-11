@@ -3,24 +3,27 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { HttpError } from './http.js';
 import { requireEnv } from './secrets.js';
 import { supabaseAsService } from './supabaseUser.js';
+import {
+  PushPayloadError,
+  buildFcmMessageParts,
+  normalizePushPayload,
+  type NormalizedPushPayload,
+  type PushPayloadInput,
+} from '../../../lib/push/payload.js';
 
-interface ServiceAccount {
-  project_id: string;
-  private_key: string;
-  client_email: string;
-}
-
-export interface PushPayload {
-  title: string;
-  body: string;
-  /** FCM data map; every value must be a string. */
-  data?: Record<string, string>;
-}
+/** @deprecated Prefer PushPayloadInput; kept for call-site compatibility. */
+export type PushPayload = PushPayloadInput;
 
 export interface PushSendResult {
   sent: number;
   failed: number;
   removed: number;
+}
+
+interface ServiceAccount {
+  project_id: string;
+  private_key: string;
+  client_email: string;
 }
 
 interface CachedToken {
@@ -100,15 +103,25 @@ function isStaleTokenError(status: number, errorJson: unknown): boolean {
   return /UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND|Requested entity was not found/i.test(text);
 }
 
+function toNormalized(payload: PushPayloadInput | NormalizedPushPayload): NormalizedPushPayload {
+  if ('extraData' in payload && 'channel' in payload && typeof payload.channel === 'string') {
+    return payload as NormalizedPushPayload;
+  }
+  try {
+    return normalizePushPayload(payload);
+  } catch (err) {
+    if (err instanceof PushPayloadError) throw new HttpError(400, err.message);
+    throw err;
+  }
+}
+
 async function sendOne(
   accessToken: string,
   projectId: string,
   token: string,
-  payload: PushPayload
+  payload: NormalizedPushPayload
 ): Promise<'ok' | 'stale' | 'error'> {
-  const data =
-    payload.data &&
-    Object.fromEntries(Object.entries(payload.data).map(([k, v]) => [k, String(v)]));
+  const parts = buildFcmMessageParts(payload);
 
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
     method: 'POST',
@@ -119,9 +132,9 @@ async function sendOne(
     body: JSON.stringify({
       message: {
         token,
-        notification: { title: payload.title, body: payload.body },
-        ...(data && Object.keys(data).length ? { data } : {}),
-        android: { priority: 'HIGH' },
+        notification: parts.notification,
+        data: parts.data,
+        android: parts.android,
       },
     }),
   });
@@ -137,7 +150,10 @@ async function sendOne(
  * Send a notification to every FCM token for `userId`.
  * Uses the service-role client (SUPABASE_SECRET_KEY_CURTIS) so RLS does not block the agent.
  */
-export async function sendPushToUser(userId: string, payload: PushPayload): Promise<PushSendResult> {
+export async function sendPushToUser(
+  userId: string,
+  payload: PushPayloadInput | NormalizedPushPayload
+): Promise<PushSendResult> {
   if (!userId || typeof userId !== 'string') {
     throw new HttpError(400, 'userId is required');
   }
@@ -148,7 +164,7 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
 export async function sendPushToCaller(
   db: SupabaseClient,
   userId: string,
-  payload: PushPayload
+  payload: PushPayloadInput | NormalizedPushPayload
 ): Promise<PushSendResult> {
   return sendPushWithClient(db, userId, payload);
 }
@@ -156,13 +172,9 @@ export async function sendPushToCaller(
 async function sendPushWithClient(
   db: SupabaseClient,
   userId: string,
-  payload: PushPayload
+  payload: PushPayloadInput | NormalizedPushPayload
 ): Promise<PushSendResult> {
-  const title = payload.title.trim();
-  const body = payload.body.trim();
-  if (!title || !body) throw new HttpError(400, 'title and body are required');
-  if (title.length > 120) throw new HttpError(400, 'title is too long');
-  if (body.length > 1000) throw new HttpError(400, 'body is too long');
+  const normalized = toNormalized(payload);
 
   const { data: rows, error } = await db.from('device_tokens').select('token').eq('user_id', userId);
   if (error) {
@@ -183,7 +195,7 @@ async function sendPushWithClient(
   let removed = 0;
 
   for (const token of tokens) {
-    const outcome = await sendOne(accessToken, projectId, token, { title, body, data: payload.data });
+    const outcome = await sendOne(accessToken, projectId, token, normalized);
     if (outcome === 'ok') {
       sent += 1;
       continue;

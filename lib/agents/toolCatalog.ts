@@ -119,7 +119,10 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
     integration: 'push',
     access: 'write',
     risk: 'low',
-    description: 'Send a push notification to this user\'s Android app.',
+    description:
+      'Send a push to this user\'s Android app. Prefer short title, useful body, and a stable notification_key so updates replace prior alerts. ' +
+      'Optional: subtitle, expanded_body, channel (urgent|default|digest|progress|quiet), urgency, silent, deep_link, image_url, actions, style (default|big_text|big_picture|progress). ' +
+      'Use style progress + ongoing only for in-progress work. Do not spam.',
     connected: true,
   },
   { name: 'jira_get_issue', integration: 'jira', access: 'read', risk: 'low', description: 'Fetch one Jira issue by exact key.', connected: false },

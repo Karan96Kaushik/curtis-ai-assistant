@@ -1,10 +1,7 @@
 import { callFunction } from './client';
+import type { PushPayloadInput } from '../push/payload';
 
-export interface SendPushRequest {
-  title: string;
-  body: string;
-  data?: Record<string, string>;
-}
+export type SendPushRequest = PushPayloadInput;
 
 export interface SendPushResponse {
   sent: number;

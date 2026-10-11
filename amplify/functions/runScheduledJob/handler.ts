@@ -154,6 +154,12 @@ async function runClaimed(job: ScheduledJobRecord, lockedAt: string): Promise<vo
       const push = await sendPushToUser(job.user_id, {
         title: failed ? 'Scheduled task failed' : 'Scheduled task',
         body: notificationBody(replyText, failed ? 'The scheduled task failed.' : 'The scheduled task finished.'),
+        category: 'status',
+        channel: failed ? 'urgent' : 'default',
+        urgency: failed ? 'high' : 'normal',
+        notification_key: `schedule:${job.id}`,
+        deep_link: conversationId ? `/chat/${conversationId}` : undefined,
+        actions: [{ id: 'open', label: 'Open' }],
         data: { conversationId, jobId: job.id },
       });
       pushSent = push.sent;

@@ -18,6 +18,7 @@
     "test:github-list-repos": "node scripts/test-github-list-repos.js",
     "test:agent-runtime": "tsx scripts/test-agent-runtime.ts",
     "test:agent-step": "tsx --test scripts/test-agent-step.ts",
+    "test:push-payload": "tsx --test scripts/test-push-payload.ts",
     "test:integrations": "node scripts/test-integrations-live.js",
     "test": "npm run test:github-list-repos",
     "dev": "vite",
