@@ -22,6 +22,7 @@ export interface AgentRuntime {
     text: string
   ) => Promise<void>;
   email: EmailReader;
+  notifications: import('./notificationStore.js').NotificationStore;
   schedule: AgentScheduler;
   now: () => Date;
 }

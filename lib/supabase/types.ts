@@ -260,6 +260,7 @@ export interface Database {
           system_prompt: string;
           allowed_tools: string[];
           approval_required: string[];
+          allowed_apps: string[];
           model_chain: Json;
           allowed_providers: string[];
           max_steps: number;
@@ -278,6 +279,7 @@ export interface Database {
           system_prompt: string;
           allowed_tools?: string[];
           approval_required?: string[];
+          allowed_apps?: string[];
           model_chain: Json;
           allowed_providers?: string[];
           max_steps?: number;
@@ -292,6 +294,7 @@ export interface Database {
           system_prompt?: string;
           allowed_tools?: string[];
           approval_required?: string[];
+          allowed_apps?: string[];
           model_chain?: Json;
           allowed_providers?: string[];
           max_steps?: number;

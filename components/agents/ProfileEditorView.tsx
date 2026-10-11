@@ -8,19 +8,26 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { validateProfile, outboundToolNames } from '@/amplify/functions/_shared/agent/profileRules';
+import { validateProfile, egressToolNames } from '@/amplify/functions/_shared/agent/profileRules';
 import { agentApiConfigured } from '@/lib/amplify/client';
 import { saveAgentProfile } from '@/lib/amplify/agent-functions';
 import { chainFromModelIds, DEFAULT_MODEL_IDS, modelIdsFromChain, providersInChain } from '@/lib/agents/modelChain';
-import { INTEGRATION_LABEL, INTEGRATION_ORDER, PERMISSION_TOOLS, type PermissionTool } from '@/lib/agents/toolCatalog';
+import {
+  INBOX_TOOLS,
+  INTEGRATION_LABEL,
+  INTEGRATION_ORDER,
+  PERMISSION_TOOLS,
+  type PermissionTool,
+} from '@/lib/agents/toolCatalog';
 import { getAgentProfile } from '@/lib/supabase/agentRuns';
 
-const DEFAULT_PROMPT = 'Work toward the user\'s goal. Use tools for facts. Ask when something is ambiguous. Finish with a short summary.';
+const DEFAULT_PROMPT =
+  'Work toward the user\'s goal. Notifications are truncated previews, not full messages — say so when it matters. Use tools for facts. Ask when something is ambiguous. Finish with a short summary.';
 
 function rules() {
   return {
     knownTools: new Set(PERMISSION_TOOLS.map((tool) => tool.name)),
-    outbound: outboundToolNames(PERMISSION_TOOLS),
+    egress: egressToolNames(PERMISSION_TOOLS),
   };
 }
 
@@ -36,8 +43,9 @@ export default function ProfileEditorView() {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [modelIds, setModelIds] = useState<string[]>([...DEFAULT_MODEL_IDS]);
   const [showErrors, setShowErrors] = useState(false);
-  const [allowed, setAllowed] = useState<string[]>(['request_phone_notifications']);
+  const [allowed, setAllowed] = useState<string[]>([...INBOX_TOOLS]);
   const [approval, setApproval] = useState<string[]>([]);
+  const [allowedAppsText, setAllowedAppsText] = useState('');
   const [maxSteps, setMaxSteps] = useState(25);
   const [maxRuntimeMin, setMaxRuntimeMin] = useState(60);
   const [tokenBudget, setTokenBudget] = useState(60000);
@@ -60,6 +68,7 @@ export default function ProfileEditorView() {
         setModelIds(ids.length ? ids : [...DEFAULT_MODEL_IDS]);
         setAllowed(profile.allowed_tools);
         setApproval(profile.approval_required);
+        setAllowedAppsText((profile.allowed_apps ?? []).join(', '));
         setMaxSteps(profile.max_steps);
         setMaxRuntimeMin(profile.max_runtime_min);
         setTokenBudget(profile.token_budget);
@@ -77,6 +86,14 @@ export default function ProfileEditorView() {
 
   const allowedSet = useMemo(() => new Set(allowed), [allowed]);
   const approvalSet = useMemo(() => new Set(approval), [approval]);
+  const allowedApps = useMemo(
+    () =>
+      allowedAppsText
+        .split(/[,|\n]/)
+        .map((app) => app.trim())
+        .filter(Boolean),
+    [allowedAppsText]
+  );
   const { chain, unknown } = chainFromModelIds(modelIds);
   const errors = useMemo(() => {
     const next = unknown.length ? [`Unknown model: ${unknown.join(', ')}`] : [];
@@ -88,6 +105,7 @@ export default function ProfileEditorView() {
           system_prompt: prompt,
           allowed_tools: allowed,
           approval_required: approval,
+          allowed_apps: allowedApps,
           model_chain: chain,
           allowed_providers: providersInChain(chain),
           max_steps: maxSteps,
@@ -99,7 +117,7 @@ export default function ProfileEditorView() {
       )
     );
     return next;
-  }, [allowed, approval, chain, description, maxRuntimeMin, maxSteps, name, prompt, tokenBudget, unknown]);
+  }, [allowed, allowedApps, approval, chain, description, maxRuntimeMin, maxSteps, name, prompt, tokenBudget, unknown]);
 
   function toggleTool(tool: PermissionTool) {
     if (allowedSet.has(tool.name)) {
@@ -129,6 +147,7 @@ export default function ProfileEditorView() {
         systemPrompt: prompt,
         allowedTools: allowed,
         approvalRequired: approval,
+        allowedApps,
         modelIds,
         maxSteps,
         maxRuntimeMin,
@@ -201,11 +220,27 @@ export default function ProfileEditorView() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Notification apps</CardTitle>
+          <CardDescription>
+            Leave empty to allow every non-sensitive app. Banking, OTP, and authenticator apps stay hidden unless you list them.
+            Comma-separated app names or package fragments.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={allowedAppsText}
+            placeholder="Gmail, Slack"
+            onChange={(event) => setAllowedAppsText(event.target.value)}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Permissions</CardTitle>
           <CardDescription>
-            These are the same functions the chat assistant can call. The agent only receives the ones you allow. ask_user,
-            update_scratchpad, and finish are always available. Turning on a write requires approval until you clear it. Chat session
-            controls such as confirm_pending are not listed; agent runs pause for approval instead.
+            Messaging is notification-only. The agent only receives the tools you allow. ask_user, update_scratchpad, and finish are
+            always available. A write that leaves your devices needs approval when the profile can also read notifications.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

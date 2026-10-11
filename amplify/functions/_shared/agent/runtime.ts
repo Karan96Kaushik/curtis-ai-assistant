@@ -3,6 +3,7 @@ import { supabaseAsService } from '../supabaseUser.js';
 import type { AgentRuntime } from './deps.js';
 import { supabaseEmailReader } from './emailReader.js';
 import { enqueueStep } from './enqueue.js';
+import { supabaseNotificationStore } from './notificationStore.js';
 import { notifyUser } from './notify.js';
 import { callModelChain } from './provider.js';
 import { TOOLS } from './registry.js';
@@ -17,6 +18,7 @@ export function productionRuntime(): AgentRuntime {
     enqueue: enqueueStep,
     notify: notifyUser,
     email: supabaseEmailReader(db),
+    notifications: supabaseNotificationStore(db),
     schedule: {
       async schedule(input) {
         const job = await createAgentScheduledJob(

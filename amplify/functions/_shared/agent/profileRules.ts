@@ -1,4 +1,4 @@
-import { PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
+import { INBOX_TOOLS, PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
 import type { ProfileSnapshot, ProviderName } from './types.js';
 
 export const CORE_TOOL_NAMES = new Set(['ask_user', 'finish', 'update_scratchpad']);
@@ -9,16 +9,20 @@ export const PRIVATE_READ_TOOLS = new Set(
 );
 
 /**
- * Writes that can leave the user's own devices.
- * send_push_notification is to the user only, so it is not outbound.
+ * Writes that can leave the user's own devices, or plant a later prompt that can.
+ * Defined by egress metadata so new tools are covered automatically.
+ * send_push_notification is to the user only, so it is not egress.
  */
-export function outboundToolNames(tools: readonly { name: string; outbound?: boolean }[]): Set<string> {
+export function egressToolNames(tools: readonly { name: string; egress?: boolean }[]): Set<string> {
   const names = new Set<string>();
   for (const tool of tools) {
-    if (tool.outbound) names.add(tool.name);
+    if (tool.egress) names.add(tool.name);
   }
   return names;
 }
+
+/** @deprecated Use egressToolNames. */
+export const outboundToolNames = egressToolNames;
 
 export interface ProfileDraft {
   name: string;
@@ -26,6 +30,7 @@ export interface ProfileDraft {
   system_prompt: string;
   allowed_tools: string[];
   approval_required: string[];
+  allowed_apps: string[];
   model_chain: { provider: ProviderName; model: string }[];
   allowed_providers: ProviderName[];
   max_steps: number;
@@ -42,7 +47,9 @@ function isProvider(value: string): value is ProviderName {
 
 export interface ProfileRules {
   knownTools: Set<string>;
-  outbound: Set<string>;
+  egress: Set<string>;
+  /** Older call sites may still pass outbound. */
+  outbound?: Set<string>;
 }
 
 /** Returns human-readable errors. An empty list means the profile may be saved. */
@@ -66,16 +73,22 @@ export function validateProfile(draft: ProfileDraft, rules: ProfileRules): strin
     if (!allowed.includes(tool)) errors.push(`${tool} is in approval_required but not allowed_tools.`);
   }
 
+  const egress = rules.egress.size ? rules.egress : (rules.outbound ?? new Set());
   const readsPrivate = allowed.some((tool) => PRIVATE_READ_TOOLS.has(tool));
-  const outbound = allowed.filter((tool) => rules.outbound.has(tool));
-  if (readsPrivate && outbound.length) {
-    const missing = outbound.filter((tool) => !approval.includes(tool));
+  const egressAllowed = allowed.filter((tool) => egress.has(tool));
+  if (readsPrivate && egressAllowed.length) {
+    const missing = egressAllowed.filter((tool) => !approval.includes(tool));
     if (missing.length) {
       errors.push(
-        `This profile can read private messages and send outbound. Add approval for: ${missing.join(', ')}.`
+        `This profile can read private notifications and write outside your devices. Add approval for: ${missing.join(', ')}.`
       );
     }
   }
+
+  if (draft.allowed_apps.some((app) => !app.trim() || app.trim().length > 80)) {
+    errors.push('Each allowed app must be 1–80 characters.');
+  }
+  if (draft.allowed_apps.length > 40) errors.push('At most 40 allowed apps.');
 
   const providers = draft.allowed_providers.filter(isProvider);
   if (!providers.length) errors.push('Choose at least one model provider.');
@@ -103,7 +116,7 @@ export function validateProfile(draft: ProfileDraft, rules: ProfileRules): strin
   return errors;
 }
 
-/** Groq first, then Google. OpenRouter is omitted for profiles that read personal mail. */
+/** Groq first, then Google. OpenRouter is omitted for profiles that read personal notifications. */
 export function defaultModelChain(): ProfileSnapshot['model_chain'] {
   const groq = process.env.GROQ_MODEL?.trim() || 'openai/gpt-oss-120b';
   const groqFallback = process.env.GROQ_FALLBACK_MODEL?.trim() || 'openai/gpt-oss-20b';
@@ -117,11 +130,12 @@ export function defaultModelChain(): ProfileSnapshot['model_chain'] {
 export function inboxProfileDraft(): ProfileDraft {
   return {
     name: 'Inbox',
-    description: 'Reads recent phone notifications. Does not send messages.',
+    description: 'Reads phone notification previews. Cannot send messages. Banking and OTP apps stay hidden until listed.',
     system_prompt:
-      'You triage the user\'s recent phone notifications. Read them, summarize what needs attention, and finish with a short summary. Ask when a choice is ambiguous.',
-    allowed_tools: ['request_phone_notifications'],
+      'You triage the user\'s recent phone notifications. They are truncated previews, not full messages — say so when it matters. Summarize what needs attention and finish with a short summary. Ask when a choice is ambiguous. Use draft_reply when the user should send something themselves.',
+    allowed_tools: [...INBOX_TOOLS],
     approval_required: [],
+    allowed_apps: [],
     model_chain: defaultModelChain(),
     allowed_providers: ['groq', 'google'],
     max_steps: 25,
@@ -139,6 +153,7 @@ export function snapshotFrom(profile: ProfileSnapshot): ProfileSnapshot {
     system_prompt: profile.system_prompt,
     allowed_tools: [...profile.allowed_tools],
     approval_required: [...profile.approval_required],
+    allowed_apps: [...(profile.allowed_apps ?? [])],
     model_chain: profile.model_chain.map((entry) => ({ ...entry })),
     allowed_providers: [...profile.allowed_providers],
     max_steps: profile.max_steps,

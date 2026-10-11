@@ -17,6 +17,7 @@ interface AgentRequest {
   system_prompt?: string;
   allowed_tools?: unknown;
   approval_required?: unknown;
+  allowed_apps?: unknown;
   model_ids?: unknown;
   max_steps?: unknown;
   max_runtime_min?: unknown;
@@ -63,6 +64,7 @@ export const handler = withHttp('agentApi', async (event) => {
         system_prompt: body.system_prompt,
         allowed_tools: body.allowed_tools,
         approval_required: body.approval_required,
+        allowed_apps: body.allowed_apps,
         model_ids: body.model_ids,
         max_steps: body.max_steps,
         max_runtime_min: body.max_runtime_min,

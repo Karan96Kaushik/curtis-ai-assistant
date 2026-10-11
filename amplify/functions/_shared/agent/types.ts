@@ -48,6 +48,8 @@ export interface ProfileSnapshot {
   system_prompt: string;
   allowed_tools: string[];
   approval_required: string[];
+  /** App name or package fragments this profile may read. Empty = all non-sensitive apps. */
+  allowed_apps: string[];
   model_chain: ModelRef[];
   allowed_providers: ProviderName[];
   max_steps: number;
@@ -193,7 +195,9 @@ export interface ToolCtx {
   userId: string;
   runId: string;
   profileId: string;
+  allowedApps: string[];
   email: EmailReader;
+  notifications: import('./notificationStore.js').NotificationStore;
   schedule: AgentScheduler | null;
   now: Date;
 }
@@ -208,8 +212,8 @@ export interface ToolDef {
   maxResultChars: number;
   /** Omitted tools are callable. False keeps a granted tool off the model until it is connected. */
   available?: boolean;
-  /** Can send content outside the user's own devices. */
-  outbound?: boolean;
+  /** Write that can leave the user's own devices or plant a later prompt. */
+  egress?: boolean;
   handler: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<{ text: string }>;
 }
 

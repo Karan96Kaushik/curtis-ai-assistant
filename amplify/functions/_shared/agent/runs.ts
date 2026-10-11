@@ -1,7 +1,7 @@
 import { chainFromModelIds, providersInChain } from '../../../../lib/agents/modelChain.js';
 import type { AgentRuntime } from './deps.js';
 import { executeTool } from './execute.js';
-import { inboxProfileDraft, outboundToolNames, snapshotFrom, validateProfile, type ProfileDraft } from './profileRules.js';
+import { egressToolNames, inboxProfileDraft, snapshotFrom, validateProfile, type ProfileDraft } from './profileRules.js';
 import { knownToolNames, registryToolName, TOOLS } from './registry.js';
 import { redactValue, sanitizeToolError } from './text.js';
 import type { EventType, ProfileRecord, RunRecord, RunTrigger } from './types.js';
@@ -33,7 +33,7 @@ export async function ensureInboxProfile(rt: AgentRuntime, userId: string): Prom
   const existing = await rt.store.findInbox(userId);
   if (existing) return existing;
   const draft = inboxProfileDraft();
-  const errors = validateProfile(draft, { knownTools: knownToolNames(TOOLS), outbound: outboundToolNames(TOOLS) });
+  const errors = validateProfile(draft, { knownTools: knownToolNames(TOOLS), egress: egressToolNames(TOOLS) });
   if (errors.length) throw new AgentInputError(errors.join(' '));
   const now = rt.now().toISOString();
   const profile: ProfileRecord = {
@@ -44,6 +44,7 @@ export async function ensureInboxProfile(rt: AgentRuntime, userId: string): Prom
     system_prompt: draft.system_prompt,
     allowed_tools: draft.allowed_tools,
     approval_required: draft.approval_required,
+    allowed_apps: draft.allowed_apps,
     model_chain: draft.model_chain.flatMap((entry) => {
       if (entry.provider !== 'groq' && entry.provider !== 'google' && entry.provider !== 'openrouter') return [];
       return [{ provider: entry.provider, model: entry.model }];
@@ -194,6 +195,7 @@ export interface SaveProfileInput {
   system_prompt?: string;
   allowed_tools?: unknown;
   approval_required?: unknown;
+  allowed_apps?: unknown;
   model_ids?: unknown;
   max_steps?: unknown;
   max_runtime_min?: unknown;
@@ -212,7 +214,7 @@ function wholeNumber(value: unknown, fallback: number): number {
 }
 
 function profileRules() {
-  return { knownTools: knownToolNames(TOOLS), outbound: outboundToolNames(TOOLS) };
+  return { knownTools: knownToolNames(TOOLS), egress: egressToolNames(TOOLS) };
 }
 
 function draftFromInput(input: SaveProfileInput): ProfileDraft {
@@ -226,6 +228,9 @@ function draftFromInput(input: SaveProfileInput): ProfileDraft {
     system_prompt: typeof input.system_prompt === 'string' ? input.system_prompt : '',
     allowed_tools: stringList(input.allowed_tools),
     approval_required: stringList(input.approval_required),
+    allowed_apps: stringList(input.allowed_apps)
+      .map((app) => app.trim())
+      .filter(Boolean),
     model_chain: chain,
     allowed_providers: providersInChain(chain),
     max_steps: wholeNumber(input.max_steps, 25),
@@ -246,6 +251,7 @@ export async function saveProfile(rt: AgentRuntime, userId: string, input: SaveP
     system_prompt: draft.system_prompt.trim(),
     allowed_tools: [...new Set(draft.allowed_tools)],
     approval_required: [...new Set(draft.approval_required)],
+    allowed_apps: [...new Set(draft.allowed_apps)],
     model_chain: draft.model_chain,
     allowed_providers: draft.allowed_providers,
     max_steps: draft.max_steps,

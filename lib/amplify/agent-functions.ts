@@ -32,6 +32,7 @@ export interface SaveAgentProfileInput {
   systemPrompt: string;
   allowedTools: string[];
   approvalRequired: string[];
+  allowedApps: string[];
   modelIds: string[];
   maxSteps: number;
   maxRuntimeMin: number;
@@ -47,6 +48,7 @@ export async function saveAgentProfile(input: SaveAgentProfileInput): Promise<{ 
     system_prompt: input.systemPrompt,
     allowed_tools: input.allowedTools,
     approval_required: input.approvalRequired,
+    allowed_apps: input.allowedApps,
     model_ids: input.modelIds,
     max_steps: input.maxSteps,
     max_runtime_min: input.maxRuntimeMin,

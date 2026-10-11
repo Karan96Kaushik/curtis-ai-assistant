@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PERMISSION_TOOLS } from '../../../../lib/agents/toolCatalog.js';
 import { sendPushToUser } from '../fcm.js';
+import { formatSearchResult, replyLinkFromNotification } from './notificationStore.js';
 import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
 import { capText, wrapUntrusted } from './text.js';
 
@@ -19,8 +20,37 @@ const scratchpad = z.object({
   text: z.string().max(800),
 });
 
-const phoneNotifications = z.object({
-  duration_minutes: z.number().int().min(1).max(24 * 60),
+const searchNotifications = z.object({
+  app: z.string().max(80).optional(),
+  sender: z.string().max(120).optional(),
+  text: z.string().max(200).optional(),
+  since: z.string().max(40).optional(),
+  until: z.string().max(40).optional(),
+  limit: z.number().int().min(1).max(15).optional(),
+});
+
+const notificationDigest = z.object({
+  since: z.string().min(1).max(40),
+  group_by: z.enum(['app', 'sender']).optional(),
+});
+
+const getNotification = z.object({
+  id: z.string().min(1).max(40),
+});
+
+const getMore = z.object({
+  offset: z.number().int().min(0).max(500),
+  app: z.string().max(80).optional(),
+  sender: z.string().max(120).optional(),
+  text: z.string().max(200).optional(),
+  since: z.string().max(40).optional(),
+  until: z.string().max(40).optional(),
+  limit: z.number().int().min(1).max(15).optional(),
+});
+
+const draftReply = z.object({
+  notification_id: z.string().min(1).max(40),
+  body: z.string().min(1).max(1500),
 });
 
 const pushSend = z.object({
@@ -98,26 +128,128 @@ export const TOOLS: ToolDef[] = [
     handler: noop,
   },
   {
-    name: 'request_phone_notifications',
+    name: 'search_notifications',
     integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'Read this user\'s recent phone notifications, including mail, codes, and personal messages.',
-    schema: phoneNotifications,
-    maxResultChars: 4000,
+    description: 'Search phone notification previews by app, sender, text, and time. Not full messages.',
+    schema: searchNotifications,
+    maxResultChars: 2500,
     handler: async (args, ctx) => {
-      const parsed = phoneNotifications.parse(args);
-      const cutoff = ctx.now.getTime() - parsed.duration_minutes * 60_000;
-      const items = (await ctx.email.list(ctx.userId, undefined, 40)).filter(
-        (item) => Date.parse(item.postedAt) >= cutoff
+      const parsed = searchNotifications.parse(args);
+      const result = await ctx.notifications.search(ctx.userId, ctx.allowedApps, parsed, ctx.now);
+      return { text: formatSearchResult(result.items, result.coverage, result.nextOffset) };
+    },
+  },
+  {
+    name: 'notification_digest',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Counts and top senders for a time window. Compact triage of notification previews.',
+    schema: notificationDigest,
+    maxResultChars: 1500,
+    handler: async (args, ctx) => {
+      const parsed = notificationDigest.parse(args);
+      const result = await ctx.notifications.digest(
+        ctx.userId,
+        ctx.allowedApps,
+        parsed.since,
+        parsed.group_by ?? 'app',
+        ctx.now
       );
-      const text = items.length
-        ? items
-            .slice(0, 20)
-            .map((item) => `${item.id} | ${item.sender} | ${item.subject} | ${item.snippet}`)
-            .join('\n')
-        : 'No phone notifications in that window.';
-      return { text };
+      return { text: result.text };
+    },
+  },
+  {
+    name: 'get_notification',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Read the full stored text of one notification by id.',
+    schema: getNotification,
+    maxResultChars: 2500,
+    handler: async (args, ctx) => {
+      const parsed = getNotification.parse(args);
+      const result = await ctx.notifications.get(ctx.userId, ctx.allowedApps, parsed.id, ctx.now);
+      if (!result.item) return { text: `${result.coverage.text}\nNotification not found or not allowed for this profile.` };
+      return {
+        text: `${result.coverage.text}\nPreview (not a full message):\n${result.item.app} | ${result.item.sender}\n${result.body}`,
+      };
+    },
+  },
+  {
+    name: 'list_notification_apps',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'List apps that have notification rows this profile may query.',
+    schema: z.object({}),
+    maxResultChars: 1500,
+    handler: async (_args, ctx) => {
+      const result = await ctx.notifications.listApps(ctx.userId, ctx.allowedApps, ctx.now);
+      const apps = result.apps.length ? result.apps.join('\n') : 'No apps in range for this profile.';
+      return { text: `${result.coverage.text}\n${apps}` };
+    },
+  },
+  {
+    name: 'get_more',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Fetch the next page of a previous search_notifications query.',
+    schema: getMore,
+    maxResultChars: 2500,
+    handler: async (args, ctx) => {
+      const parsed = getMore.parse(args);
+      const result = await ctx.notifications.search(
+        ctx.userId,
+        ctx.allowedApps,
+        {
+          app: parsed.app,
+          sender: parsed.sender,
+          text: parsed.text,
+          since: parsed.since,
+          until: parsed.until,
+          limit: parsed.limit,
+          offset: parsed.offset,
+        },
+        ctx.now
+      );
+      return { text: formatSearchResult(result.items, result.coverage, result.nextOffset) };
+    },
+  },
+  {
+    name: 'draft_reply',
+    integration: 'phone',
+    access: 'write',
+    risk: 'low',
+    description: 'Store a reply draft and a tap-to-open link. The user sends it; the agent cannot send messages.',
+    schema: draftReply,
+    maxResultChars: 800,
+    handler: async (args, ctx) => {
+      const parsed = draftReply.parse(args);
+      const row = await ctx.notifications.loadForDraft(ctx.userId, ctx.allowedApps, parsed.notification_id);
+      if (!row) return { text: 'Notification not found or not allowed. Contact must come from a stored notification.' };
+      const link = replyLinkFromNotification(row, parsed.body);
+      if (!link) {
+        return {
+          text: 'Could not build a reply link from the stored notification (no email or WhatsApp number in that row).',
+        };
+      }
+      const preview = parsed.body.replace(/\s+/g, ' ').trim().slice(0, 140);
+      try {
+        await sendPushToUser(ctx.userId, {
+          title: 'Draft reply ready',
+          body: preview,
+          data: { link: link.link, run_id: ctx.runId, notification_id: String(row.id), channel: link.channel },
+        });
+      } catch {
+        // Draft still returned in the tool result for the run page.
+      }
+      return {
+        text: `Draft stored for ${link.channel}. Open: ${link.link}\nYou send this yourself; the agent cannot send messages.`,
+      };
     },
   },
   {
@@ -139,6 +271,7 @@ export const TOOLS: ToolDef[] = [
     integration: 'scheduler',
     access: 'write',
     risk: 'medium',
+    egress: true,
     description:
       'Schedule work for later. When it is due, a new agent run starts with this profile and the prompt. Use exactly one of run_in_minutes, run_at (UK local time), or cron.',
     schema: scheduleTask,
@@ -221,7 +354,7 @@ for (const tool of PERMISSION_TOOLS) {
     schema: unavailableArgs,
     maxResultChars: 300,
     available: false,
-    outbound: tool.outbound,
+    egress: tool.egress,
     handler: async () => ({ text: `${tool.name} is not connected yet.` }),
   });
 }

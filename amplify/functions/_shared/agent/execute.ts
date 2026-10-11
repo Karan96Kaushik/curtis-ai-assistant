@@ -1,11 +1,13 @@
 import type { AgentStore } from './store.js';
 import { getTool, presentToolResult, registryToolName } from './registry.js';
 import { sanitizeToolError } from './text.js';
+import type { NotificationStore } from './notificationStore.js';
 import type { AgentScheduler, EmailReader, RunRecord, ToolDef } from './types.js';
 
 export interface ToolHost {
   store: AgentStore;
   email: EmailReader;
+  notifications: NotificationStore;
   schedule: AgentScheduler;
   now: () => Date;
 }
@@ -38,7 +40,9 @@ export async function executeTool(
       userId: run.user_id,
       runId: run.id,
       profileId: run.profile_id,
+      allowedApps: run.profile_snapshot.allowed_apps ?? [],
       email: rt.email,
+      notifications: rt.notifications,
       schedule: rt.schedule,
       now: rt.now(),
     });

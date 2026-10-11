@@ -208,6 +208,7 @@ create table public.agent_profiles (
   system_prompt text not null check (char_length(system_prompt) between 1 and 4000),
   allowed_tools text[] not null default '{}',
   approval_required text[] not null default '{}',
+  allowed_apps text[] not null default '{}',
   model_chain jsonb not null,
   allowed_providers text[] not null default '{}',
   max_steps int not null default 25 check (max_steps between 1 and 100),

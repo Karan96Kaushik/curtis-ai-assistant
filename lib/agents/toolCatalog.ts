@@ -23,8 +23,11 @@ export interface PermissionTool {
   connected: boolean;
   /** Reads private message or device-notification content. */
   privateRead?: boolean;
-  /** Can send content outside the user's own devices. Combined with a private read, approval is required. */
-  outbound?: boolean;
+  /**
+   * Write that can leave the user's own devices (or plant a later prompt that can).
+   * Combined with a private read, approval is required. send_push_notification is not egress.
+   */
+  egress?: boolean;
 }
 
 export const INTEGRATION_LABEL: Record<PermissionIntegration, string> = {
@@ -42,19 +45,63 @@ export const INTEGRATION_LABEL: Record<PermissionIntegration, string> = {
 };
 
 /**
- * Same function names the chat agent already offers.
- * Session controls (think, clear_context, clear_chat, confirm_pending, cancel_pending)
- * stay off profiles: agent runs use ask_user, finish, and approval instead.
+ * Profile-grantable tools. Messaging is notification-only: no email.* or whatsapp.* send/read of full threads.
+ * Session controls (think, clear_context, clear_chat, confirm_pending, cancel_pending) stay off profiles.
  */
 export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   {
-    name: 'request_phone_notifications',
+    name: 'search_notifications',
     integration: 'phone',
     access: 'read',
     risk: 'low',
-    description: 'Read this user\'s recent phone notifications, including mail, codes, and personal messages.',
+    description: 'Search phone notification previews by app, sender, text, and time. Results are truncated previews, not full messages.',
     connected: true,
     privateRead: true,
+  },
+  {
+    name: 'notification_digest',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Counts and top senders for a time window. Compact triage view of notification previews.',
+    connected: true,
+    privateRead: true,
+  },
+  {
+    name: 'get_notification',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Read the full stored text of one notification by id from search or digest.',
+    connected: true,
+    privateRead: true,
+  },
+  {
+    name: 'list_notification_apps',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'List apps that have notification rows this profile may query.',
+    connected: true,
+    privateRead: true,
+  },
+  {
+    name: 'get_more',
+    integration: 'phone',
+    access: 'read',
+    risk: 'low',
+    description: 'Fetch the next page of a previous search_notifications query by cursor.',
+    connected: true,
+    privateRead: true,
+  },
+  {
+    name: 'draft_reply',
+    integration: 'phone',
+    access: 'write',
+    risk: 'low',
+    description:
+      'Store a reply draft and a tap-to-open link (mailto or WhatsApp). You send it yourself; the agent cannot send messages.',
+    connected: true,
   },
   {
     name: 'send_push_notification',
@@ -73,11 +120,11 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   { name: 'jira_list_projects', integration: 'jira', access: 'read', risk: 'low', description: 'List Jira projects, or issue types for one project.', connected: false },
   { name: 'jira_list_comments', integration: 'jira', access: 'read', risk: 'low', description: 'List comments on a Jira issue.', connected: false },
   { name: 'jira_whoami', integration: 'jira', access: 'read', risk: 'low', description: 'Show which Jira account is authenticated.', connected: false },
-  { name: 'jira_update', integration: 'jira', access: 'write', risk: 'high', description: 'Update a Jira issue: status, comment, description, assignee, or labels.', connected: false, outbound: true },
-  { name: 'jira_create', integration: 'jira', access: 'write', risk: 'high', description: 'Create a Jira issue.', connected: false, outbound: true },
-  { name: 'jira_link_issues', integration: 'jira', access: 'write', risk: 'medium', description: 'Link two Jira issues.', connected: false, outbound: true },
-  { name: 'jira_log_work', integration: 'jira', access: 'write', risk: 'medium', description: 'Log time spent on a Jira issue.', connected: false, outbound: true },
-  { name: 'jira_delete_comment', integration: 'jira', access: 'write', risk: 'high', description: 'Delete a Jira comment.', connected: false, outbound: true },
+  { name: 'jira_update', integration: 'jira', access: 'write', risk: 'high', description: 'Update a Jira issue: status, comment, description, assignee, or labels.', connected: false, egress: true },
+  { name: 'jira_create', integration: 'jira', access: 'write', risk: 'high', description: 'Create a Jira issue.', connected: false, egress: true },
+  { name: 'jira_link_issues', integration: 'jira', access: 'write', risk: 'medium', description: 'Link two Jira issues.', connected: false, egress: true },
+  { name: 'jira_log_work', integration: 'jira', access: 'write', risk: 'medium', description: 'Log time spent on a Jira issue.', connected: false, egress: true },
+  { name: 'jira_delete_comment', integration: 'jira', access: 'write', risk: 'high', description: 'Delete a Jira comment.', connected: false, egress: true },
   { name: 'github_search_repos', integration: 'github', access: 'read', risk: 'low', description: 'Search GitHub repositories.', connected: false },
   { name: 'github_list_repos', integration: 'github', access: 'read', risk: 'low', description: 'List repositories for the user or an organization.', connected: false },
   { name: 'github_get_repo', integration: 'github', access: 'read', risk: 'low', description: 'Read details for one repository.', connected: false },
@@ -91,9 +138,9 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   { name: 'github_search_issues', integration: 'github', access: 'read', risk: 'low', description: 'Search GitHub issues.', connected: false },
   { name: 'github_get_issue', integration: 'github', access: 'read', risk: 'low', description: 'Read one GitHub issue and recent comments.', connected: false },
   { name: 'github_monthly_activity', integration: 'github', access: 'read', risk: 'low', description: 'Report this user\'s GitHub activity for one calendar month.', connected: false },
-  { name: 'github_create_tag', integration: 'github', access: 'write', risk: 'high', description: 'Create a git tag on a repository.', connected: false, outbound: true },
-  { name: 'github_add_comment', integration: 'github', access: 'write', risk: 'high', description: 'Post a comment on a GitHub pull request or issue.', connected: false, outbound: true },
-  { name: 'github_create_issue', integration: 'github', access: 'write', risk: 'high', description: 'Open a GitHub issue.', connected: false, outbound: true },
+  { name: 'github_create_tag', integration: 'github', access: 'write', risk: 'high', description: 'Create a git tag on a repository.', connected: false, egress: true },
+  { name: 'github_add_comment', integration: 'github', access: 'write', risk: 'high', description: 'Post a comment on a GitHub pull request or issue.', connected: false, egress: true },
+  { name: 'github_create_issue', integration: 'github', access: 'write', risk: 'high', description: 'Open a GitHub issue.', connected: false, egress: true },
   { name: 'web_search', integration: 'web', access: 'read', risk: 'low', description: 'Search the web and return the top results.', connected: false },
   { name: 'web_fetch_page', integration: 'web', access: 'read', risk: 'low', description: 'Open a URL and return readable page text.', connected: false },
   { name: 'browser_status', integration: 'browser', access: 'read', risk: 'low', description: 'Check whether the Firefox extension is connected.', connected: false },
@@ -102,7 +149,7 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   { name: 'browser_open_tab', integration: 'browser', access: 'write', risk: 'medium', description: 'Open a URL in Firefox or focus a matching tab.', connected: false },
   { name: 'browser_navigate', integration: 'browser', access: 'write', risk: 'medium', description: 'Navigate a Firefox tab to a URL.', connected: false },
   { name: 'browser_click', integration: 'browser', access: 'write', risk: 'high', description: 'Click an element in the active Firefox tab.', connected: false },
-  { name: 'browser_type', integration: 'browser', access: 'write', risk: 'high', description: 'Type text into a field in the active Firefox tab.', connected: false, outbound: true },
+  { name: 'browser_type', integration: 'browser', access: 'write', risk: 'high', description: 'Type text into a field in the active Firefox tab.', connected: false, egress: true },
   { name: 'teams_open', integration: 'teams', access: 'write', risk: 'low', description: 'Focus an existing Teams tab, or open one if none exists.', connected: false },
   { name: 'teams_list_chats', integration: 'teams', access: 'read', risk: 'low', description: 'List recent Teams chats and channels.', connected: false, privateRead: true },
   { name: 'teams_read_messages', integration: 'teams', access: 'read', risk: 'low', description: 'Read recent messages from a Teams chat.', connected: false, privateRead: true },
@@ -114,6 +161,7 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
     risk: 'medium',
     description: 'Schedule work for later. When it is due, a new agent run starts with this profile.',
     connected: true,
+    egress: true,
   },
   { name: 'cancel_schedule', integration: 'scheduler', access: 'write', risk: 'medium', description: 'Cancel a pending scheduled task by id.', connected: true },
   { name: 'memory_read', integration: 'memory', access: 'read', risk: 'low', description: 'Read org-memory.md.', connected: false },
@@ -129,7 +177,7 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   { name: 'wf_release_approve_draft', integration: 'release', access: 'write', risk: 'medium', description: 'Approve a release draft and stage its writes for confirmation.', connected: false },
   { name: 'wf_release_skip_step', integration: 'release', access: 'write', risk: 'medium', description: 'Skip the release write that is waiting and stage the next one.', connected: false },
   { name: 'wf_release_advance', integration: 'release', access: 'write', risk: 'medium', description: 'Resume a paused release workflow.', connected: false },
-  { name: 'wf_release_execute_pending', integration: 'release', access: 'write', risk: 'high', description: 'Execute the staged release writes to GitHub and Jira.', connected: false, outbound: true },
+  { name: 'wf_release_execute_pending', integration: 'release', access: 'write', risk: 'high', description: 'Execute the staged release writes to GitHub and Jira.', connected: false, egress: true },
 ];
 
 export const INTEGRATION_ORDER: readonly PermissionIntegration[] = [
@@ -144,4 +192,14 @@ export const INTEGRATION_ORDER: readonly PermissionIntegration[] = [
   'memory',
   'timesheet',
   'release',
+];
+
+/** Default Inbox tools: notification triage only. */
+export const INBOX_TOOLS: readonly string[] = [
+  'search_notifications',
+  'notification_digest',
+  'get_notification',
+  'list_notification_apps',
+  'get_more',
+  'draft_reply',
 ];

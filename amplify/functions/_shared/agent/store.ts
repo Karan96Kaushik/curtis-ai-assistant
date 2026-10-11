@@ -40,6 +40,7 @@ export function snapshotFromRow(value: unknown): ProfileSnapshot | null {
     system_prompt: row.system_prompt,
     allowed_tools: asStringArray(row.allowed_tools),
     approval_required: asStringArray(row.approval_required),
+    allowed_apps: asStringArray(row.allowed_apps),
     model_chain: chain.flatMap((entry) => {
       const item = asObject(entry);
       if (!item) return [];
@@ -313,6 +314,7 @@ export class SupabaseAgentStore implements AgentStore {
         system_prompt: profile.system_prompt,
         allowed_tools: profile.allowed_tools,
         approval_required: profile.approval_required,
+        allowed_apps: profile.allowed_apps,
         model_chain: profile.model_chain,
         allowed_providers: profile.allowed_providers,
         max_steps: profile.max_steps,
