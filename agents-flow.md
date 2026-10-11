@@ -35,7 +35,7 @@ A schedule uses the same run. `scheduleTick` claims a due job and invokes `runSc
 
 Core rules tell the model that notifications are previews, not full messages, and that summary/scratchpad may be derived from that untrusted data. OTP codes, card numbers, and password-reset links are redacted in the tool layer before they reach a provider.
 
-Every notification tool returns a coverage note, for example `data complete through 14:02 UTC; last device sync 3 min ago`, built from the newest notification row and `device_tokens.updated_at`. When that is older than an hour, the note warns that the listener may be down.
+Every notification tool returns a coverage note from the newest `notifications` row, for example `newest stored notification 3 min ago`. The phone writes those rows directly. `device_tokens` is only for outbound FCM and is not a sign that notification capture is healthy. A quiet window is not reported as a down listener or an offline phone.
 
 ### Notification tools
 

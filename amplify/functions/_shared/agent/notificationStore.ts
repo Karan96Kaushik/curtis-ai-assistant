@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const LOOKUP_TIMEOUT_MS = 8_000;
 const MAX_SEARCH = 20;
 const MAX_BODY = 600;
-const STALE_SYNC_MS = 60 * 60_000;
 
 /** Banking, OTP, and authenticator apps stay hidden unless a profile lists them in allowed_apps. */
 const SENSITIVE_APP =
@@ -166,57 +165,78 @@ function rowTimestampIso(row: { posted_at?: number | string | null; created_at?:
 async function loadLatestNotificationAt(db: SupabaseClient, userId: string): Promise<string | null> {
   const byPosted = await db
     .from('notifications')
-    .select('posted_at, created_at')
+    .select('posted_at')
     .eq('user_id', userId)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
   if (!byPosted.error && byPosted.data) {
-    const iso = rowTimestampIso(byPosted.data as { posted_at?: number | string | null; created_at?: number | string | null });
+    const iso = rowTimestampIso(byPosted.data as { posted_at?: number | string | null });
     if (iso) return iso;
+  }
+  if (byPosted.error && !/posted_at/i.test(byPosted.error.message)) {
+    console.error('[notifications] latest row lookup failed', byPosted.error.message);
+    return null;
   }
   const byCreated = await db
     .from('notifications')
-    .select('posted_at, created_at')
+    .select('created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
-  if (!byCreated.error && byCreated.data) {
-    return rowTimestampIso(byCreated.data as { posted_at?: number | string | null; created_at?: number | string | null });
+  if (byCreated.error) {
+    console.error('[notifications] latest row lookup failed', byCreated.error.message);
+    return null;
   }
-  return null;
+  if (!byCreated.data) return null;
+  return rowTimestampIso(byCreated.data as { created_at?: number | string | null });
 }
 
-async function loadCoverage(db: SupabaseClient, userId: string, now: Date): Promise<CoverageNote> {
-  const nowMs = now.getTime();
-  const lastDataAt = await loadLatestNotificationAt(db, userId);
-
-  let lastDeviceSyncAt: string | null = null;
-  const device = await db
-    .from('device_tokens')
-    .select('updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!device.error && device.data && typeof (device.data as { updated_at?: string }).updated_at === 'string') {
-    lastDeviceSyncAt = (device.data as { updated_at: string }).updated_at;
+function newestPostedIso(rows: NotificationRow[]): string | null {
+  let best: number | null = null;
+  for (const row of rows) {
+    const ms = postedAtMs(row.posted_at ?? row.created_at);
+    if (ms == null) continue;
+    if (best == null || ms > best) best = ms;
   }
+  return best == null ? null : new Date(best).toISOString();
+}
 
+function newerIso(current: string | null, candidate: string | null): string | null {
+  const candidateMs = candidate ? Date.parse(candidate) : NaN;
+  if (!Number.isFinite(candidateMs)) return current;
+  const currentMs = current ? Date.parse(current) : NaN;
+  if (!Number.isFinite(currentMs) || candidateMs > currentMs) return new Date(candidateMs).toISOString();
+  return current;
+}
+
+/**
+ * The phone inserts notification rows directly. `device_tokens` is only the FCM
+ * push target, so a quiet table is not evidence that a listener is down.
+ */
+function coverageNote(lastDataAt: string | null, now: Date, matchedRows: boolean): CoverageNote {
   const dataMs = lastDataAt ? Date.parse(lastDataAt) : NaN;
-  const tokenMs = lastDeviceSyncAt ? Date.parse(lastDeviceSyncAt) : NaN;
-  // Freshness of the listener is the latest notification row — not FCM token refresh.
-  const stale = !Number.isFinite(dataMs) || nowMs - dataMs > STALE_SYNC_MS;
-  const lastNotification = Number.isFinite(dataMs) ? agoLabel(nowMs, dataMs) : 'none found';
-  const pushToken = Number.isFinite(tokenMs) ? agoLabel(nowMs, tokenMs) : 'none registered';
-  const warn = stale ? ' Warning: no recent notifications — listener may be down or the phone is offline.' : '';
+  const hasTime = Number.isFinite(dataMs);
+  let text = 'Coverage: no stored notifications matched this query.';
+  if (hasTime) text = `Coverage: newest stored notification ${agoLabel(now.getTime(), dataMs)}.`;
+  else if (matchedRows) text = 'Coverage: stored notifications matched this query.';
   return {
-    text: `Coverage: last notification ${lastNotification}; push token refreshed ${pushToken}.${warn}`,
-    stale,
-    lastDataAt,
-    lastDeviceSyncAt,
+    text,
+    stale: false,
+    lastDataAt: hasTime ? new Date(dataMs).toISOString() : null,
+    lastDeviceSyncAt: null,
   };
+}
+
+async function loadCoverage(
+  db: SupabaseClient,
+  userId: string,
+  now: Date,
+  rows: NotificationRow[] = []
+): Promise<CoverageNote> {
+  const lookedUp = await loadLatestNotificationAt(db, userId);
+  return coverageNote(newerIso(lookedUp, newestPostedIso(rows)), now, rows.length > 0);
 }
 
 async function fetchWindow(
@@ -289,7 +309,7 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
       const rows = filterRows(await fetchWindow(db, userId, sinceMs, untilMs, limit + offset + 5), allowedApps, query);
       const page = rows.slice(offset, offset + limit);
       const items = page.map(toItem).filter((item): item is NotificationItem => item != null);
-      const coverage = await loadCoverage(db, userId, now);
+      const coverage = await loadCoverage(db, userId, now, rows);
       const nextOffset = offset + limit < rows.length ? offset + limit : null;
       return { items, coverage, nextOffset };
     },
@@ -306,7 +326,7 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }
       const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
-      const coverage = await loadCoverage(db, userId, now);
+      const coverage = await loadCoverage(db, userId, now, rows);
       const lines = [
         formatCoverage(coverage),
         `Digest since ${new Date(sinceMs).toISOString()} (${rows.length} unique previews, grouped by ${groupBy}):`,
@@ -318,8 +338,7 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
 
     async get(userId, allowedApps, id, now) {
       const numeric = Number(id);
-      const coverage = await loadCoverage(db, userId, now);
-      if (!Number.isInteger(numeric)) return { item: null, body: '', coverage };
+      if (!Number.isInteger(numeric)) return { item: null, body: '', coverage: await loadCoverage(db, userId, now) };
       const { data, error } = await db
         .from('notifications')
         .select('id, app_name, package_name, title, text, sub_text, big_text, category, posted_at')
@@ -327,8 +346,9 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
         .eq('id', numeric)
         .maybeSingle();
       if (error) throw new Error('Could not read notification');
-      if (!data) return { item: null, body: '', coverage };
+      if (!data) return { item: null, body: '', coverage: await loadCoverage(db, userId, now) };
       const row = data as NotificationRow;
+      const coverage = await loadCoverage(db, userId, now, [row]);
       if (!appAllowed(row.app_name || '', row.package_name || '', allowedApps)) {
         return { item: null, body: '', coverage };
       }
@@ -341,7 +361,7 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
       const sinceMs = now.getTime() - 7 * 24 * 60 * 60_000;
       const rows = filterRows(await fetchWindow(db, userId, sinceMs, now.getTime(), 100), allowedApps, {});
       const apps = [...new Set(rows.map((row) => (row.app_name || row.package_name || 'App').trim()))].sort();
-      const coverage = await loadCoverage(db, userId, now);
+      const coverage = await loadCoverage(db, userId, now, rows);
       return { apps, coverage };
     },
 
