@@ -99,7 +99,12 @@ export async function handleStep(
   const out = await rt.callModel(profile, prompt, toModelTools(tools));
 
   for (const fallback of out.fallbacks) {
-    await emit(rt, run.id, 'provider_fallback', { ...fallback });
+    await emit(rt, run.id, 'provider_fallback', {
+      from: fallback.from,
+      to: fallback.to,
+      status: fallback.status,
+      ...(fallback.detail ? { detail: fallback.detail.slice(0, 480) } : {}),
+    });
   }
 
   if (out.kind === 'rate_limited') {

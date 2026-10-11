@@ -15,7 +15,47 @@ const CALL_TIMEOUT_MS = 18_000;
 interface ChatCompletion {
   choices?: { message?: ChoiceMessage }[];
   usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
-  error?: { message?: string };
+  error?: unknown;
+  message?: unknown;
+}
+
+/** Pull a human-readable reason out of OpenAI-compatible and Google error bodies. */
+export function providerErrorDetail(status: number, provider: string, raw: string, payload: unknown): string {
+  const parts: string[] = [`${provider} returned ${status}`];
+  const fromPayload = extractErrorText(payload);
+  if (fromPayload) {
+    parts.push(fromPayload);
+  } else {
+    const flat = raw.replace(/\s+/g, ' ').trim();
+    if (flat) parts.push(flat.slice(0, 400));
+  }
+  return parts.join(': ').slice(0, 480);
+}
+
+function extractErrorText(value: unknown, depth = 0): string {
+  if (depth > 4 || value == null) return '';
+  if (typeof value === 'string') {
+    const flat = value.replace(/\s+/g, ' ').trim();
+    return flat.slice(0, 400);
+  }
+  if (typeof value !== 'object') return '';
+  const row = value as Record<string, unknown>;
+  if (typeof row.message === 'string' && row.message.trim()) {
+    const status = typeof row.status === 'string' ? row.status : typeof row.code === 'string' || typeof row.code === 'number' ? String(row.code) : '';
+    return status ? `${status}: ${row.message.trim()}` : row.message.trim();
+  }
+  if (row.error != null) {
+    const nested = extractErrorText(row.error, depth + 1);
+    if (nested) return nested;
+  }
+  if (Array.isArray(row.details)) {
+    for (const item of row.details) {
+      const nested = extractErrorText(item, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  if (typeof row.error === 'string' && row.error.trim()) return row.error.trim();
+  return '';
 }
 
 interface ChoiceMessage {
@@ -175,10 +215,20 @@ export async function callModelChain(opts: {
       });
     } catch (err) {
       const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-      lastMessage = timedOut ? `${current.provider} timed out.` : `${current.provider} request failed.`;
+      const detail = timedOut
+        ? `${current.provider} timed out.`
+        : `${current.provider} request failed${err instanceof Error && err.message ? `: ${err.message}` : '.'}`;
+      lastMessage = detail.slice(0, 480);
       retryable = true;
       delaySeconds = Math.max(delaySeconds, 30);
-      if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: timedOut ? 408 : 0 });
+      if (next) {
+        fallbacks.push({
+          from: `${current.provider}:${current.model}`,
+          to: `${next.provider}:${next.model}`,
+          status: timedOut ? 408 : 0,
+          detail: lastMessage,
+        });
+      }
       continue;
     }
 
@@ -191,13 +241,20 @@ export async function callModelChain(opts: {
     }
 
     if (!res.ok) {
-      lastMessage = payload?.error?.message || `${current.provider} returned ${res.status}`;
+      lastMessage = providerErrorDetail(res.status, current.provider, raw, payload);
       const retry = res.status === 429 || res.status >= 500;
       if (retry) {
         retryable = true;
         delaySeconds = Math.max(delaySeconds, res.status === 429 ? retryAfterSeconds(res) : 30);
       }
-      if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: res.status });
+      if (next) {
+        fallbacks.push({
+          from: `${current.provider}:${current.model}`,
+          to: `${next.provider}:${next.model}`,
+          status: res.status,
+          detail: lastMessage,
+        });
+      }
       continue;
     }
 
@@ -220,5 +277,5 @@ export async function callModelChain(opts: {
   }
 
   if (retryable) return { kind: 'rate_limited', delaySeconds: Math.min(900, delaySeconds), fallbacks };
-  return { kind: 'provider_error', message: lastMessage.slice(0, 300), fallbacks };
+  return { kind: 'provider_error', message: lastMessage.slice(0, 480), fallbacks };
 }

@@ -1,7 +1,15 @@
 import { chainFromModelIds, providersInChain } from '../../../../lib/agents/modelChain.js';
 import type { AgentRuntime } from './deps.js';
 import { executeTool } from './execute.js';
-import { egressToolNames, inboxProfileDraft, snapshotFrom, validateProfile, type ProfileDraft } from './profileRules.js';
+import {
+  egressToolNames,
+  ensureEgressApproval,
+  inboxProfileDraft,
+  normalizeAllowedTools,
+  snapshotFrom,
+  validateProfile,
+  type ProfileDraft,
+} from './profileRules.js';
 import { knownToolNames, registryToolName, TOOLS } from './registry.js';
 import { redactValue, sanitizeToolError } from './text.js';
 import type { EventType, ProfileRecord, RunRecord, RunTrigger } from './types.js';
@@ -226,8 +234,11 @@ function draftFromInput(input: SaveProfileInput): ProfileDraft {
     name: typeof input.name === 'string' ? input.name : '',
     description: description || null,
     system_prompt: typeof input.system_prompt === 'string' ? input.system_prompt : '',
-    allowed_tools: stringList(input.allowed_tools),
-    approval_required: stringList(input.approval_required),
+    allowed_tools: normalizeAllowedTools(stringList(input.allowed_tools)),
+    approval_required: ensureEgressApproval(
+      normalizeAllowedTools(stringList(input.allowed_tools)),
+      stringList(input.approval_required)
+    ),
     allowed_apps: stringList(input.allowed_apps)
       .map((app) => app.trim())
       .filter(Boolean),

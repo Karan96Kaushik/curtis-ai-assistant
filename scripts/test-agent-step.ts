@@ -14,8 +14,8 @@ import {
   replyLinkFromNotification,
   type NotificationStore,
 } from '../amplify/functions/_shared/agent/notificationStore.js';
-import { egressToolNames, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
-import { toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
+import { egressToolNames, ensureEgressApproval, normalizeAllowedTools, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
+import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
 import { answerRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
 import { handleStep } from '../amplify/functions/_shared/agent/step.js';
@@ -393,6 +393,14 @@ describe('agent step loop', () => {
 });
 
 describe('profile rules', () => {
+  it('maps legacy phone tools and requires approval for schedule_task', () => {
+    const tools = normalizeAllowedTools(['request_phone_notifications', 'schedule_task']);
+    assert.ok(tools.includes('search_notifications'));
+    assert.ok(tools.includes('schedule_task'));
+    assert.equal(tools.includes('request_phone_notifications'), false);
+    assert.deepEqual(ensureEgressApproval(tools, []), ['schedule_task']);
+  });
+
   it('lists notification tools and marks schedule_task as egress', () => {
     const names = PERMISSION_TOOLS.map((tool) => tool.name);
     assert.equal(new Set(names).size, names.length);
@@ -512,6 +520,18 @@ describe('context and tool output', () => {
     assert.equal(call?.function?.name, 'search_notifications');
   });
 
+  it('keeps Google error bodies in the provider failure message', () => {
+    const detail = providerErrorDetail(
+      400,
+      'google',
+      '{"error":{"message":"Tool use with function calling is unsupported","status":"INVALID_ARGUMENT"}}',
+      { error: { message: 'Tool use with function calling is unsupported', status: 'INVALID_ARGUMENT' } }
+    );
+    assert.match(detail, /google returned 400/);
+    assert.match(detail, /Tool use with function calling is unsupported/);
+    assert.match(detail, /INVALID_ARGUMENT/);
+  });
+
   it('keeps the selected model order and strips the OpenRouter prefix', () => {
     const { chain, unknown } = chainFromModelIds(['gemini-3.5-flash-lite', 'openai/gpt-oss-20b', 'not-a-model']);
     assert.deepEqual(
@@ -532,7 +552,7 @@ describe('context and tool output', () => {
 });
 
 describe('profiles', () => {
-  it('saves the model chain and rejects egress without approval', async () => {
+  it('saves the model chain and adds approval for egress with private reads', async () => {
     const store = new MemoryAgentStore();
     const rt: AgentRuntime = {
       store,
@@ -568,16 +588,15 @@ describe('profiles', () => {
     assert.deepEqual(saved.allowed_providers, ['google', 'groq']);
     assert.deepEqual(saved.allowed_apps, ['Gmail']);
 
-    await assert.rejects(
-      () =>
-        saveProfile(rt, 'user-1', {
-          name: 'Reply',
-          system_prompt: 'Reply to mail.',
-          allowed_tools: ['search_notifications', 'github_add_comment'],
-          approval_required: [],
-          model_ids: ['openai/gpt-oss-20b'],
-        }),
-      /approval/
-    );
+    const migrated = await saveProfile(rt, 'user-1', {
+      name: 'Reply',
+      system_prompt: 'Reply to mail.',
+      allowed_tools: ['request_phone_notifications', 'schedule_task'],
+      approval_required: [],
+      model_ids: ['openai/gpt-oss-20b'],
+    });
+    assert.ok(migrated.allowed_tools.includes('search_notifications'));
+    assert.equal(migrated.allowed_tools.includes('request_phone_notifications'), false);
+    assert.ok(migrated.approval_required.includes('schedule_task'));
   });
 });

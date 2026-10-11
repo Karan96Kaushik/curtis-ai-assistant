@@ -8,6 +8,49 @@ export const PRIVATE_READ_TOOLS = new Set(
   PERMISSION_TOOLS.filter((tool) => tool.privateRead).map((tool) => tool.name)
 );
 
+/** Old messaging tool names → current notification tools. */
+const LEGACY_TOOL_MAP: Record<string, readonly string[]> = {
+  request_phone_notifications: INBOX_TOOLS.filter((name) => name !== 'draft_reply'),
+  'email.list': ['search_notifications', 'notification_digest', 'list_notification_apps'],
+  'email.get': ['get_notification', 'get_more'],
+  'push.send': ['send_push_notification'],
+};
+
+/**
+ * Expand legacy tool names and drop unknowns that are not in the catalog.
+ * Keeps connected and grantable catalog names so profiles created before the
+ * notification revision can still be edited and saved.
+ */
+export function normalizeAllowedTools(tools: readonly string[]): string[] {
+  const known = new Set(PERMISSION_TOOLS.map((tool) => tool.name));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of tools) {
+    const name = raw.trim();
+    if (!name) continue;
+    const mapped = LEGACY_TOOL_MAP[name] ?? [name];
+    for (const tool of mapped) {
+      if (!known.has(tool) || seen.has(tool)) continue;
+      seen.add(tool);
+      out.push(tool);
+    }
+  }
+  return out;
+}
+
+/** When private reads and egress writes are both allowed, require approval for those writes. */
+export function ensureEgressApproval(allowedTools: readonly string[], approvalRequired: readonly string[]): string[] {
+  const egress = egressToolNames(PERMISSION_TOOLS);
+  const readsPrivate = allowedTools.some((tool) => PRIVATE_READ_TOOLS.has(tool));
+  const approval = new Set(approvalRequired.filter((tool) => allowedTools.includes(tool)));
+  if (readsPrivate) {
+    for (const tool of allowedTools) {
+      if (egress.has(tool)) approval.add(tool);
+    }
+  }
+  return [...approval];
+}
+
 /**
  * Writes that can leave the user's own devices, or plant a later prompt that can.
  * Defined by egress metadata so new tools are covered automatically.
@@ -146,13 +189,14 @@ export function inboxProfileDraft(): ProfileDraft {
 }
 
 export function snapshotFrom(profile: ProfileSnapshot): ProfileSnapshot {
+  const allowed_tools = normalizeAllowedTools(profile.allowed_tools);
   return {
     id: profile.id,
     name: profile.name,
     description: profile.description,
     system_prompt: profile.system_prompt,
-    allowed_tools: [...profile.allowed_tools],
-    approval_required: [...profile.approval_required],
+    allowed_tools,
+    approval_required: ensureEgressApproval(allowed_tools, profile.approval_required),
     allowed_apps: [...(profile.allowed_apps ?? [])],
     model_chain: profile.model_chain.map((entry) => ({ ...entry })),
     allowed_providers: [...profile.allowed_providers],

@@ -78,13 +78,26 @@ function EventRow({ event }: { event: AgentEventRow }) {
     );
   }
   if (event.type === 'finished') return null;
-  if (event.type === 'failed') return <p className="text-sm text-destructive">{payloadText(event.payload, 'error')}</p>;
+  if (event.type === 'failed') {
+    return (
+      <details open className="rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive">
+        <summary className="cursor-pointer font-medium">Failed</summary>
+        <p className="mt-2 whitespace-pre-wrap">{payloadText(event.payload, 'error')}</p>
+      </details>
+    );
+  }
   if (event.type === 'rate_limited') return <p className="text-sm text-muted-foreground">Rate limited. The run will resume.</p>;
   if (event.type === 'provider_fallback') {
+    const detail = payloadText(event.payload, 'detail');
+    const status = payloadText(event.payload, 'status');
     return (
-      <p className="text-xs text-muted-foreground">
-        Switched provider from {payloadText(event.payload, 'from')} to {payloadText(event.payload, 'to')}
-      </p>
+      <details className="rounded-md border px-3 py-2 text-sm">
+        <summary className="cursor-pointer text-muted-foreground">
+          Switched provider from {payloadText(event.payload, 'from')} to {payloadText(event.payload, 'to')}
+          {status ? ` (${status})` : ''}
+        </summary>
+        {detail && <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{detail}</p>}
+      </details>
     );
   }
   if (event.type === 'summary') return <p className="text-xs text-muted-foreground">Compressed earlier steps.</p>;
@@ -266,7 +279,17 @@ export default function RunDetailView() {
             <CardTitle className="text-base text-destructive">Failed</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <p className="text-sm">{run.error}</p>
+            <p className="text-sm whitespace-pre-wrap break-words">{run.error || 'The run failed.'}</p>
+            {events
+              .filter((event) => event.type === 'provider_fallback' && payloadText(event.payload, 'detail'))
+              .map((event) => (
+                <p key={event.id} className="rounded-md border px-3 py-2 text-xs whitespace-pre-wrap text-muted-foreground">
+                  {payloadText(event.payload, 'from')}
+                  {payloadText(event.payload, 'status') ? ` · ${payloadText(event.payload, 'status')}` : ''}
+                  {'\n'}
+                  {payloadText(event.payload, 'detail')}
+                </p>
+              ))}
             <Button size="sm" className="w-fit" disabled={busy} onClick={() => void retry()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               Retry

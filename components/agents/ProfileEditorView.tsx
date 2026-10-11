@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { validateProfile, egressToolNames } from '@/amplify/functions/_shared/agent/profileRules';
+import {
+  ensureEgressApproval,
+  egressToolNames,
+  normalizeAllowedTools,
+  validateProfile,
+} from '@/amplify/functions/_shared/agent/profileRules';
 import { agentApiConfigured } from '@/lib/amplify/client';
 import { saveAgentProfile } from '@/lib/amplify/agent-functions';
 import { chainFromModelIds, DEFAULT_MODEL_IDS, modelIdsFromChain, providersInChain } from '@/lib/agents/modelChain';
@@ -66,8 +71,9 @@ export default function ProfileEditorView() {
         setPrompt(profile.system_prompt);
         const ids = modelIdsFromChain(profile.model_chain);
         setModelIds(ids.length ? ids : [...DEFAULT_MODEL_IDS]);
-        setAllowed(profile.allowed_tools);
-        setApproval(profile.approval_required);
+        const tools = normalizeAllowedTools(profile.allowed_tools ?? []);
+        setAllowed(tools);
+        setApproval(ensureEgressApproval(tools, profile.approval_required ?? []));
         setAllowedAppsText((profile.allowed_apps ?? []).join(', '));
         setMaxSteps(profile.max_steps);
         setMaxRuntimeMin(profile.max_runtime_min);
@@ -121,12 +127,14 @@ export default function ProfileEditorView() {
 
   function toggleTool(tool: PermissionTool) {
     if (allowedSet.has(tool.name)) {
-      setAllowed(allowed.filter((name) => name !== tool.name));
-      setApproval(approval.filter((name) => name !== tool.name));
+      const nextAllowed = allowed.filter((name) => name !== tool.name);
+      setAllowed(nextAllowed);
+      setApproval(ensureEgressApproval(nextAllowed, approval.filter((name) => name !== tool.name)));
       return;
     }
-    setAllowed([...allowed, tool.name]);
-    if (tool.access === 'write') setApproval([...approval, tool.name]);
+    const nextAllowed = [...allowed, tool.name];
+    setAllowed(nextAllowed);
+    setApproval(ensureEgressApproval(nextAllowed, tool.access === 'write' || tool.egress ? [...approval, tool.name] : approval));
   }
 
   function toggleApproval(name: string) {

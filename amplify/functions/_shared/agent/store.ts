@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ensureEgressApproval, normalizeAllowedTools } from './profileRules.js';
 import type {
   AgentEvent,
   ChatMessage,
@@ -38,8 +39,11 @@ export function snapshotFromRow(value: unknown): ProfileSnapshot | null {
     name: typeof row.name === 'string' ? row.name : 'Agent',
     description: typeof row.description === 'string' ? row.description : null,
     system_prompt: row.system_prompt,
-    allowed_tools: asStringArray(row.allowed_tools),
-    approval_required: asStringArray(row.approval_required),
+    allowed_tools: normalizeAllowedTools(asStringArray(row.allowed_tools)),
+    approval_required: ensureEgressApproval(
+      normalizeAllowedTools(asStringArray(row.allowed_tools)),
+      asStringArray(row.approval_required)
+    ),
     allowed_apps: asStringArray(row.allowed_apps),
     model_chain: chain.flatMap((entry) => {
       const item = asObject(entry);

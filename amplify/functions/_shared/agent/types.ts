@@ -236,6 +236,8 @@ export interface ProviderFallback {
   from: string;
   to: string;
   status: number;
+  /** Provider error body or message when the attempt failed. */
+  detail?: string;
 }
 
 export type ModelTurn =
