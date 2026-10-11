@@ -216,12 +216,17 @@ create table public.agent_profiles (
   token_budget int not null default 60000 check (token_budget between 1000 and 500000),
   resource_scopes jsonb not null default '{}'::jsonb,
   is_system boolean not null default false,
+  is_default boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index agent_profiles_user_updated_idx
   on public.agent_profiles (user_id, updated_at desc);
+
+create unique index agent_profiles_one_default_idx
+  on public.agent_profiles (user_id)
+  where is_default;
 
 create table public.agent_runs (
   id uuid primary key default gen_random_uuid(),

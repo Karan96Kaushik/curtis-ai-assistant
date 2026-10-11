@@ -74,7 +74,7 @@ A profile is the permission and model policy for a run. The run copies it into `
 | `allowed_apps` | Notification app allowlist (see above) |
 | `max_steps` / `max_runtime_min` / `token_budget` | Run limits |
 
-The first run for a user without a chosen profile creates a system Inbox profile. It may use the notification tools and `draft_reply`. It uses Groq, then Google. That chain is deliberate: every notification read sends private text to a third party.
+A run without a chosen profile uses the profile marked as the default. If none is marked, the first such run creates a system Inbox profile and marks it default. Inbox may use the notification tools and `draft_reply`. It uses Groq, then Google. That chain is deliberate: every notification read sends private text to a third party.
 
 Saving a profile checks:
 
@@ -95,8 +95,15 @@ Turning a write on in the editor also requires approval until that box is cleare
 | `answer` | Resume a run in `waiting_input` |
 | `approval` | `approve` or `deny` a run in `waiting_approval` |
 | `cancel` / `retry` / `save_profile` | As named |
+| `analyze_profile_run` | LLM-only review of **one** finished run. Returns suggested Instructions. Does not write the profile |
 
 UI: `/agents`, `/agents/runs/:runId`, `/agents/profiles/new`, `/agents/profiles/:profileId`.
+
+### Profile analytics
+
+From the profile editor, pick one finished run (`done`, `failed`, or `cancelled`) and call `analyze_profile_run`. The API builds a redacted pack from that run’s command, outcome, and events, then asks the profile’s model chain (no tools) for `{ rationale, suggested_system_prompt, change_bullets }`.
+
+The editor shows the suggestion. **Apply** copies it into Instructions in the page only. **Save profile** is still required. Analysis is never aggregated across runs. A run detail page can deep-link with `?analyzeRun=`.
 
 ## One step
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import ModelChainPicker from '@/components/agents/ModelChainPicker';
@@ -15,7 +15,7 @@ import {
   validateProfile,
 } from '@/amplify/functions/_shared/agent/profileRules';
 import { agentApiConfigured } from '@/lib/amplify/client';
-import { saveAgentProfile } from '@/lib/amplify/agent-functions';
+import { analyzeProfileRun, saveAgentProfile, type ProfileRunSuggestion } from '@/lib/amplify/agent-functions';
 import { chainFromModelIds, DEFAULT_MODEL_IDS, modelIdsFromChain, providersInChain } from '@/lib/agents/modelChain';
 import {
   INBOX_TOOLS,
@@ -24,7 +24,8 @@ import {
   PERMISSION_TOOLS,
   type PermissionTool,
 } from '@/lib/agents/toolCatalog';
-import { getAgentProfile } from '@/lib/supabase/agentRuns';
+import { getAgentProfile, listAgentRunsForProfile } from '@/lib/supabase/agentRuns';
+import type { AgentRunRow } from '@/lib/supabase/types';
 
 const DEFAULT_PROMPT =
   'Work toward the user\'s goal. Notifications are truncated previews, not full messages — say so when it matters. Use tools for facts. Ask when something is ambiguous. Finish with a short summary.';
@@ -36,13 +37,28 @@ function rules() {
   };
 }
 
+function runLabel(run: AgentRunRow): string {
+  const when = new Date(run.updated_at).toLocaleString();
+  const command = run.command.replace(/\s+/g, ' ').trim().slice(0, 72);
+  return `${run.status} · ${when} · ${command}`;
+}
+
 export default function ProfileEditorView() {
   const { profileId } = useParams();
+  const [searchParams] = useSearchParams();
+  const analyzeRunId = searchParams.get('analyzeRun') ?? '';
   const navigate = useNavigate();
   const [loading, setLoading] = useState(Boolean(profileId));
   const [missing, setMissing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [runs, setRuns] = useState<AgentRunRow[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState(analyzeRunId);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [suggestion, setSuggestion] = useState<ProfileRunSuggestion | null>(null);
+  const [proposedPrompt, setProposedPrompt] = useState('');
   const [isSystem, setIsSystem] = useState(false);
+  const [isDefault, setIsDefault] = useState(false);
+  const [savedAsDefault, setSavedAsDefault] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -66,6 +82,8 @@ export default function ProfileEditorView() {
           return;
         }
         setIsSystem(profile.is_system);
+        setIsDefault(profile.is_default);
+        setSavedAsDefault(profile.is_default);
         setName(profile.name);
         setDescription(profile.description ?? '');
         setPrompt(profile.system_prompt);
@@ -89,6 +107,23 @@ export default function ProfileEditorView() {
       active = false;
     };
   }, [profileId]);
+
+  useEffect(() => {
+    if (!profileId) return;
+    let active = true;
+    listAgentRunsForProfile(profileId)
+      .then((next) => {
+        if (!active) return;
+        setRuns(next);
+        setSelectedRunId((current) => current || analyzeRunId || next[0]?.id || '');
+      })
+      .catch((err) => {
+        if (active) toast.error(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      active = false;
+    };
+  }, [analyzeRunId, profileId]);
 
   const allowedSet = useMemo(() => new Set(allowed), [allowed]);
   const approvalSet = useMemo(() => new Set(approval), [approval]);
@@ -141,6 +176,31 @@ export default function ProfileEditorView() {
     setApproval(approvalSet.has(name) ? approval.filter((item) => item !== name) : [...approval, name]);
   }
 
+  async function analyze() {
+    if (!selectedRunId) return;
+    setAnalyzing(true);
+    try {
+      const next = await analyzeProfileRun(selectedRunId);
+      setSuggestion(next);
+      setProposedPrompt(next.suggested_system_prompt);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function applySuggestion() {
+    if (!proposedPrompt.trim()) return;
+    setPrompt(proposedPrompt);
+    toast.success('Copied into Instructions. Save the profile to keep it.');
+  }
+
+  function discardSuggestion() {
+    setSuggestion(null);
+    setProposedPrompt('');
+  }
+
   async function save() {
     if (errors.length) {
       setShowErrors(true);
@@ -160,6 +220,7 @@ export default function ProfileEditorView() {
         maxSteps,
         maxRuntimeMin,
         tokenBudget,
+        isDefault,
       });
       toast.success(`Saved ${saved.name}`);
       navigate('/agents');
@@ -189,7 +250,11 @@ export default function ProfileEditorView() {
       </Button>
       <div>
         <h1 className="text-lg font-semibold">{profileId ? 'Edit profile' : 'New profile'}</h1>
-        {isSystem && <p className="text-sm text-muted-foreground">This is the default Inbox profile. Runs without a chosen profile use it.</p>}
+        {isSystem && (
+          <p className="text-sm text-muted-foreground">
+            Built-in Inbox profile. It is used when no profile is marked as the default.
+          </p>
+        )}
       </div>
 
       {!agentApiConfigured && (
@@ -201,6 +266,23 @@ export default function ProfileEditorView() {
           <CardTitle className="text-base">Basics</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={isDefault}
+              disabled={savedAsDefault}
+              onChange={(event) => setIsDefault(event.target.checked)}
+            />
+            <span>
+              Default profile
+              <span className="mt-0.5 block text-muted-foreground">
+                {savedAsDefault
+                  ? 'Runs without a chosen profile use this one. Set another profile as the default to change it.'
+                  : 'Runs without a chosen profile use this one.'}
+              </span>
+            </span>
+          </label>
           <label className="flex flex-col gap-1 text-sm">
             Name
             <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
@@ -215,6 +297,79 @@ export default function ProfileEditorView() {
           </label>
         </CardContent>
       </Card>
+
+      {profileId && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Improve from a run</CardTitle>
+            <CardDescription>
+              Analyze one finished run. Suggestions stay here until you apply them and save the profile.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {runs.length === 0 && !analyzeRunId ? (
+              <p className="text-sm text-muted-foreground">No finished runs for this profile yet.</p>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1 text-sm">
+                  Run
+                  <select
+                    className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                    value={selectedRunId}
+                    onChange={(event) => setSelectedRunId(event.target.value)}
+                  >
+                    {analyzeRunId && !runs.some((run) => run.id === analyzeRunId) && (
+                      <option value={analyzeRunId}>Selected run</option>
+                    )}
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {runLabel(run)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button
+                  className="w-fit"
+                  variant="outline"
+                  disabled={analyzing || !selectedRunId || !agentApiConfigured}
+                  onClick={() => void analyze()}
+                >
+                  {analyzing ? <Loader2 className="animate-spin" /> : null}
+                  Analyze this run
+                </Button>
+              </>
+            )}
+            {suggestion && (
+              <div className="flex flex-col gap-3 rounded-md border px-3 py-3">
+                <p className="text-sm whitespace-pre-wrap">{suggestion.rationale}</p>
+                {suggestion.change_bullets.length > 0 && (
+                  <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                    {suggestion.change_bullets.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+                <label className="flex flex-col gap-1 text-sm">
+                  Proposed instructions
+                  <Textarea
+                    value={proposedPrompt}
+                    maxLength={4000}
+                    onChange={(event) => setProposedPrompt(event.target.value)}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" disabled={!proposedPrompt.trim()} onClick={applySuggestion}>
+                    Apply suggestion
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={discardSuggestion}>
+                    Discard
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

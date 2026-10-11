@@ -1,4 +1,5 @@
 import { HttpError, json, parseBody, withHttp } from '../_shared/http.js';
+import { analyzeProfileRun } from '../_shared/agent/profileAnalytics.js';
 import { AgentInputError, answerRun, cancelRun, createRun, decideApproval, retryRun, saveProfile } from '../_shared/agent/runs.js';
 import { productionRuntime } from '../_shared/agent/runtime.js';
 import { requireAllowedCaller } from '../_shared/verifySupabaseAuth.js';
@@ -22,6 +23,7 @@ interface AgentRequest {
   max_steps?: unknown;
   max_runtime_min?: unknown;
   token_budget?: unknown;
+  is_default?: boolean;
 }
 
 function asId(value: string | undefined): string {
@@ -56,6 +58,10 @@ export const handler = withHttp('agentApi', async (event) => {
       const run = await retryRun(rt, caller.userId, asId(body.id));
       return json(200, { id: run.id, status: run.status });
     }
+    if (body.action === 'analyze_profile_run') {
+      const suggestion = await analyzeProfileRun(rt, caller.userId, asId(body.id));
+      return json(200, suggestion);
+    }
     if (body.action === 'save_profile') {
       const profile = await saveProfile(rt, caller.userId, {
         id: body.id,
@@ -69,6 +75,7 @@ export const handler = withHttp('agentApi', async (event) => {
         max_steps: body.max_steps,
         max_runtime_min: body.max_runtime_min,
         token_budget: body.token_budget,
+        is_default: typeof body.is_default === 'boolean' ? body.is_default : undefined,
       });
       return json(200, { id: profile.id, name: profile.name });
     }

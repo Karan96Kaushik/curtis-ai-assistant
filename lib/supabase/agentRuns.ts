@@ -13,6 +13,18 @@ export async function listAgentProfiles(): Promise<AgentProfileRow[]> {
   return data ?? [];
 }
 
+export async function listAgentRunsForProfile(profileId: string, limit = 20): Promise<AgentRunRow[]> {
+  const { data, error } = await supabase
+    .from('agent_runs')
+    .select('*')
+    .eq('profile_id', profileId)
+    .in('status', ['done', 'failed', 'cancelled'])
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 export async function listAgentRuns(): Promise<AgentRunRow[]> {
   const { data, error } = await supabase
     .from('agent_runs')

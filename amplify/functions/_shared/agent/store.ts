@@ -140,6 +140,7 @@ function profileFromRow(row: Row): ProfileRecord | null {
     ...snapshot,
     user_id: row.user_id,
     is_system: row.is_system === true,
+    is_default: row.is_default === true,
     created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
     updated_at: typeof row.updated_at === 'string' ? row.updated_at : new Date().toISOString(),
   };
@@ -171,11 +172,15 @@ export interface AgentStore {
   transition(id: string, from: RunStatus[], to: RunStatus, patch: Partial<RunRecord>): Promise<RunRecord | null>;
   save(run: RunRecord): Promise<boolean>;
   insertEvent(event: AgentEvent): Promise<void>;
+  listEvents(runId: string, limit?: number): Promise<AgentEvent[]>;
   nextEventSeq(runId: string): Promise<number>;
   claimToolCall(row: { runId: string; toolCallId: string; toolName: string; args: unknown; access: 'read' | 'write' }): Promise<ToolClaim>;
   completeToolCall(runId: string, toolCallId: string, status: 'done' | 'error', result: unknown): Promise<void>;
   addTokens(provider: string, source: string, tokens: number): Promise<void>;
   findInbox(userId: string): Promise<ProfileRecord | null>;
+  findDefault(userId: string): Promise<ProfileRecord | null>;
+  /** Clears is_default on this user's other profiles so one profile can become the default. */
+  clearDefault(userId: string, exceptId: string): Promise<void>;
   insertProfile(profile: ProfileRecord): Promise<void>;
   updateProfile(profile: ProfileRecord): Promise<boolean>;
   loadProfile(id: string, userId: string): Promise<ProfileRecord | null>;
@@ -242,6 +247,30 @@ export class SupabaseAgentStore implements AgentStore {
     if (error) throw new Error(error.message);
   }
 
+  async listEvents(runId: string, limit = 80): Promise<AgentEvent[]> {
+    const { data, error } = await this.db
+      .from('agent_events')
+      .select('run_id, seq, type, payload, created_at')
+      .eq('run_id', runId)
+      .order('seq', { ascending: true })
+      .limit(Math.min(200, Math.max(1, limit)));
+    if (error) throw new Error(error.message);
+    return (data ?? []).flatMap((row) => {
+      const item = row as Row;
+      const type = item.type;
+      if (typeof type !== 'string' || typeof item.seq !== 'number') return [];
+      return [
+        {
+          run_id: typeof item.run_id === 'string' ? item.run_id : runId,
+          seq: item.seq,
+          type: type as AgentEvent['type'],
+          payload: asObject(item.payload) ?? {},
+          created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
+        },
+      ];
+    });
+  }
+
   async claimToolCall(row: {
     runId: string;
     toolCallId: string;
@@ -304,6 +333,28 @@ export class SupabaseAgentStore implements AgentStore {
     return data ? profileFromRow(data as Row) : null;
   }
 
+  async findDefault(userId: string): Promise<ProfileRecord | null> {
+    const { data, error } = await this.db
+      .from('agent_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_default', true)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? profileFromRow(data as Row) : null;
+  }
+
+  async clearDefault(userId: string, exceptId: string): Promise<void> {
+    const { error } = await this.db
+      .from('agent_profiles')
+      .update({ is_default: false })
+      .eq('user_id', userId)
+      .eq('is_default', true)
+      .neq('id', exceptId);
+    if (error) throw new Error(error.message);
+  }
+
   async insertProfile(profile: ProfileRecord): Promise<void> {
     const { error } = await this.db.from('agent_profiles').insert(profile);
     if (error) throw new Error(error.message);
@@ -325,6 +376,7 @@ export class SupabaseAgentStore implements AgentStore {
         max_runtime_min: profile.max_runtime_min,
         token_budget: profile.token_budget,
         resource_scopes: profile.resource_scopes,
+        is_default: profile.is_default,
         updated_at: profile.updated_at,
       })
       .eq('id', profile.id)

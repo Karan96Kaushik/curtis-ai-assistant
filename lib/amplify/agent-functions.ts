@@ -25,6 +25,16 @@ export async function retryAgentRun(id: string): Promise<{ id: string; status: s
   return callFunction('agentApi', { action: 'retry', id });
 }
 
+export interface ProfileRunSuggestion {
+  rationale: string;
+  suggested_system_prompt: string;
+  change_bullets: string[];
+}
+
+export async function analyzeProfileRun(id: string): Promise<ProfileRunSuggestion> {
+  return callFunction('agentApi', { action: 'analyze_profile_run', id });
+}
+
 export interface SaveAgentProfileInput {
   id?: string;
   name: string;
@@ -37,6 +47,7 @@ export interface SaveAgentProfileInput {
   maxSteps: number;
   maxRuntimeMin: number;
   tokenBudget: number;
+  isDefault: boolean;
 }
 
 export async function saveAgentProfile(input: SaveAgentProfileInput): Promise<{ id: string; name: string }> {
@@ -53,5 +64,6 @@ export async function saveAgentProfile(input: SaveAgentProfileInput): Promise<{ 
     max_steps: input.maxSteps,
     max_runtime_min: input.maxRuntimeMin,
     token_budget: input.tokenBudget,
+    is_default: input.isDefault,
   });
 }

@@ -254,14 +254,17 @@ export async function callModelChain(opts: {
       continue;
     }
 
+    const tools = opts.tools.filter((tool) => typeof tool.function?.name === 'string' && tool.function.name.trim());
     const body: Record<string, unknown> = {
       model: apiModelId(current.provider, current.model),
       messages: toProviderMessages(opts.messages, current.provider),
       temperature: 0.2,
-      tools: opts.tools.filter((tool) => typeof tool.function?.name === 'string' && tool.function.name.trim()),
-      tool_choice: 'auto',
     };
-    if (current.provider === 'groq') body.parallel_tool_calls = false;
+    if (tools.length) {
+      body.tools = tools;
+      body.tool_choice = 'auto';
+      if (current.provider === 'groq') body.parallel_tool_calls = false;
+    }
 
     const started = Date.now();
     let res: Response;

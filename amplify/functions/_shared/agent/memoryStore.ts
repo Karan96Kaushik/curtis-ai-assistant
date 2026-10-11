@@ -51,6 +51,15 @@ export class MemoryAgentStore implements AgentStore {
     this.events.push(clone(event));
   }
 
+  async listEvents(runId: string, limit = 80): Promise<AgentEvent[]> {
+    return clone(
+      this.events
+        .filter((event) => event.run_id === runId)
+        .sort((a, b) => a.seq - b.seq)
+        .slice(0, Math.min(200, Math.max(1, limit)))
+    );
+  }
+
   async claimToolCall(row: {
     runId: string;
     toolCallId: string;
@@ -82,6 +91,21 @@ export class MemoryAgentStore implements AgentStore {
       if (profile.user_id === userId && profile.is_system && profile.name === 'Inbox') return clone(profile);
     }
     return null;
+  }
+
+  async findDefault(userId: string) {
+    for (const profile of this.profiles.values()) {
+      if (profile.user_id === userId && profile.is_default) return clone(profile);
+    }
+    return null;
+  }
+
+  async clearDefault(userId: string, exceptId: string): Promise<void> {
+    for (const [id, profile] of this.profiles) {
+      if (profile.user_id === userId && profile.is_default && id !== exceptId) {
+        this.profiles.set(id, { ...profile, is_default: false });
+      }
+    }
   }
 
   async insertProfile(profile: import('./types.js').ProfileRecord): Promise<void> {

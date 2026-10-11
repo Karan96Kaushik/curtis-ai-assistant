@@ -61,6 +61,8 @@ export interface ProfileSnapshot {
 export interface ProfileRecord extends ProfileSnapshot {
   user_id: string;
   is_system: boolean;
+  /** Runs started without a chosen profile use this profile. At most one per user. */
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }

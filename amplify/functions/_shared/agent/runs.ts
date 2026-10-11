@@ -65,6 +65,7 @@ export async function ensureInboxProfile(rt: AgentRuntime, userId: string): Prom
     token_budget: draft.token_budget,
     resource_scopes: draft.resource_scopes,
     is_system: true,
+    is_default: true,
     created_at: now,
     updated_at: now,
   };
@@ -81,7 +82,9 @@ export async function createRun(
 ): Promise<RunRecord> {
   const text = command.trim();
   if (!text || text.length > 4000) throw new AgentInputError('Command must be 1–4000 characters.');
-  const profile = profileId ? await rt.store.loadProfile(profileId, userId) : await ensureInboxProfile(rt, userId);
+  const profile = profileId
+    ? await rt.store.loadProfile(profileId, userId)
+    : (await rt.store.findDefault(userId)) ?? (await ensureInboxProfile(rt, userId));
   if (!profile) throw new AgentInputError('Profile not found', 404);
   const now = rt.now().toISOString();
   const run: RunRecord = {
@@ -232,6 +235,7 @@ export interface SaveProfileInput {
   max_steps?: unknown;
   max_runtime_min?: unknown;
   token_budget?: unknown;
+  is_default?: boolean;
 }
 
 function stringList(value: unknown): string[] {
@@ -295,19 +299,31 @@ export async function saveProfile(rt: AgentRuntime, userId: string, input: SaveP
     resource_scopes: draft.resource_scopes,
   };
 
+  const makeDefault = input.is_default === true;
+
   if (input.id) {
     const existing = await rt.store.loadProfile(input.id, userId);
     if (!existing) throw new AgentInputError('Profile not found', 404);
-    const next: ProfileRecord = { ...existing, ...fields, is_system: existing.is_system, updated_at: now };
+    if (makeDefault) await rt.store.clearDefault(userId, existing.id);
+    const next: ProfileRecord = {
+      ...existing,
+      ...fields,
+      is_system: existing.is_system,
+      is_default: input.is_default === undefined ? existing.is_default : input.is_default,
+      updated_at: now,
+    };
     const saved = await rt.store.updateProfile(next);
     if (!saved) throw new AgentInputError('Profile not found', 404);
     return next;
   }
 
+  const id = crypto.randomUUID();
+  if (makeDefault) await rt.store.clearDefault(userId, id);
   const profile: ProfileRecord = {
-    id: crypto.randomUUID(),
+    id,
     user_id: userId,
     is_system: false,
+    is_default: makeDefault,
     created_at: now,
     updated_at: now,
     ...fields,

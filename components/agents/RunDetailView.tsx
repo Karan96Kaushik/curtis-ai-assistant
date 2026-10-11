@@ -264,6 +264,11 @@ export default function RunDetailView() {
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <Badge variant="outline">{statusLabel(run.status)}</Badge>
         <span>{snapshotName(run.profile_snapshot)}</span>
+        {(run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && (
+          <Button asChild variant="link" className="h-auto px-0">
+            <Link to={`/agents/profiles/${run.profile_id}?analyzeRun=${run.id}`}>Improve profile from this run</Link>
+          </Button>
+        )}
         <span>
           step {run.step_count}
           {maxSteps ? ` / ${maxSteps}` : ''}

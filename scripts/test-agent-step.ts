@@ -15,9 +15,10 @@ import {
   type NotificationStore,
 } from '../amplify/functions/_shared/agent/notificationStore.js';
 import { egressToolNames, ensureEgressApproval, normalizeAllowedTools, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
+import { analyzeProfileRun, buildAnalysisPack, parseAnalysisSuggestion } from '../amplify/functions/_shared/agent/profileAnalytics.js';
 import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
-import { answerRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
+import { answerRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
 import { handleStep } from '../amplify/functions/_shared/agent/step.js';
 import { capText, wrapUntrusted } from '../amplify/functions/_shared/agent/text.js';
 import type { EmailReader, EnqueueMessage, ModelTurn, ProfileSnapshot, RunRecord, ToolDef } from '../amplify/functions/_shared/agent/types.js';
@@ -639,6 +640,7 @@ describe('profiles', () => {
     );
     assert.deepEqual(saved.allowed_providers, ['google', 'groq']);
     assert.deepEqual(saved.allowed_apps, ['Gmail']);
+    assert.equal(saved.is_default, false);
 
     const migrated = await saveProfile(rt, 'user-1', {
       name: 'Reply',
@@ -650,5 +652,109 @@ describe('profiles', () => {
     assert.ok(migrated.allowed_tools.includes('search_notifications'));
     assert.equal(migrated.allowed_tools.includes('request_phone_notifications'), false);
     assert.ok(migrated.approval_required.includes('schedule_task'));
+  });
+
+  it('keeps a single default profile and uses it when a run omits one', async () => {
+    const store = new MemoryAgentStore();
+    const rt: AgentRuntime = {
+      store,
+      tools: [],
+      callModel: async () => {
+        throw new Error('unused');
+      },
+      enqueue: async () => undefined,
+      notify: async () => undefined,
+      email: { list: async () => [], get: async () => null },
+      notifications: memoryNotifications([]),
+      schedule: {
+        schedule: async () => {
+          throw new Error('unused');
+        },
+        list: async () => [],
+        cancel: async () => false,
+      },
+      now: () => NOW,
+    };
+    const first = await saveProfile(rt, 'user-1', {
+      name: 'Dev',
+      system_prompt: 'Help with code.',
+      model_ids: ['openai/gpt-oss-20b'],
+      is_default: true,
+    });
+    const second = await saveProfile(rt, 'user-1', {
+      name: 'Mail',
+      system_prompt: 'Read mail.',
+      model_ids: ['openai/gpt-oss-20b'],
+      is_default: true,
+    });
+    assert.equal(second.is_default, true);
+    assert.equal((await store.loadProfile(first.id, 'user-1'))?.is_default, false);
+
+    const kept = await saveProfile(rt, 'user-1', {
+      id: second.id,
+      name: 'Mail triage',
+      system_prompt: 'Read mail.',
+      model_ids: ['openai/gpt-oss-20b'],
+    });
+    assert.equal(kept.is_default, true);
+
+    const started = await createRun(rt, 'user-1', 'Check notifications');
+    assert.equal(started.profile_id, second.id);
+  });
+});
+
+describe('profile analytics', () => {
+  it('redacts untrusted notification text and parses a suggestion', () => {
+    const pack = buildAnalysisPack(
+      run({ status: 'done', result_summary: 'Finished.', command: 'Check inbox' }),
+      [
+        {
+          run_id: 'run-1',
+          seq: 1,
+          type: 'tool_result',
+          payload: {
+            name: 'search_notifications',
+            preview:
+              '<untrusted_data source="search_notifications" id="1">\nOTP code 123456 and sk-abcdefghijklmnop\n</untrusted_data>',
+          },
+        },
+      ],
+      'Triage notifications.'
+    );
+    const preview = JSON.stringify(pack.events[0]?.payload);
+    assert.match(preview, /untrusted preview/);
+    assert.doesNotMatch(preview, /123456/);
+    assert.doesNotMatch(preview, /sk-abcdefghijklmnop/);
+
+    const parsed = parseAnalysisSuggestion(
+      '```json\n{"rationale":"Ask sooner.","suggested_system_prompt":"Ask when the preview is incomplete.","change_bullets":["Ask sooner"]}\n```'
+    );
+    assert.equal(parsed.suggested_system_prompt, 'Ask when the preview is incomplete.');
+    assert.equal(parsed.change_bullets[0], 'Ask sooner');
+    assert.throws(() => parseAnalysisSuggestion('no json here'));
+    assert.throws(() => parseAnalysisSuggestion('{"rationale":"x","suggested_system_prompt":""}'));
+  });
+
+  it('analyzes one finished run and refuses an open run', async () => {
+    const { store, rt } = scripted([
+      {
+        kind: 'ok',
+        text: JSON.stringify({
+          rationale: 'Prefer WhatsApp first.',
+          suggested_system_prompt: 'Triage WhatsApp before email.',
+          change_bullets: ['Prefer WhatsApp'],
+        }),
+        toolCalls: [],
+        usage: { provider: 'groq', model: 'openai/gpt-oss-20b', tokens: 20, latencyMs: 5 },
+        fallbacks: [],
+      },
+    ]);
+    await store.insertRun(run({ status: 'done', result_summary: 'ok' }));
+    await store.insertEvent({ run_id: 'run-1', seq: 1, type: 'finished', payload: { summary: 'ok' } });
+    const suggestion = await analyzeProfileRun(rt, 'user-1', 'run-1');
+    assert.equal(suggestion.suggested_system_prompt, 'Triage WhatsApp before email.');
+    await assert.rejects(() => analyzeProfileRun(rt, 'other', 'run-1'));
+    await store.insertRun(run({ id: 'run-2', status: 'running' }));
+    await assert.rejects(() => analyzeProfileRun(rt, 'user-1', 'run-2'));
   });
 });

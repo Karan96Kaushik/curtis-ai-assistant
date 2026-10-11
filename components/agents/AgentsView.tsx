@@ -109,7 +109,8 @@ export default function AgentsView() {
   }, [refresh]);
 
   const inbox = profiles.find((profile) => profile.is_system && profile.name === 'Inbox') ?? null;
-  const selected = profiles.find((profile) => profile.id === profileId) ?? inbox;
+  const defaultProfile = profiles.find((profile) => profile.is_default) ?? inbox;
+  const selected = profiles.find((profile) => profile.id === profileId) ?? defaultProfile;
   const chainIds = selected ? modelIdsFromChain(selected.model_chain) : [...DEFAULT_MODEL_IDS];
 
   async function launch() {
@@ -163,12 +164,14 @@ export default function AgentsView() {
                 value={profileId}
                 onChange={(event) => setProfileId(event.target.value)}
               >
-                <option value="">Inbox (default)</option>
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
+                <option value="">{defaultProfile ? `${defaultProfile.name} (default)` : 'Inbox (default)'}</option>
+                {profiles
+                  .filter((profile) => profile.id !== defaultProfile?.id)
+                  .map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
               </select>
             </label>
             <Button asChild variant="outline">

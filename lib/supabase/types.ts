@@ -268,6 +268,7 @@ export interface Database {
           token_budget: number;
           resource_scopes: Json;
           is_system: boolean;
+          is_default: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -287,6 +288,7 @@ export interface Database {
           token_budget?: number;
           resource_scopes?: Json;
           is_system?: boolean;
+          is_default?: boolean;
         };
         Update: {
           name?: string;
@@ -301,6 +303,7 @@ export interface Database {
           max_runtime_min?: number;
           token_budget?: number;
           resource_scopes?: Json;
+          is_default?: boolean;
           updated_at?: string;
         };
         Relationships: [];
