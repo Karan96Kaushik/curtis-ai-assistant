@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const LOOKUP_TIMEOUT_MS = 8_000;
-const MAX_SEARCH = 15;
+const MAX_SEARCH = 20;
 const MAX_BODY = 600;
 const STALE_SYNC_MS = 60 * 60_000;
 

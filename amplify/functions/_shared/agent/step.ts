@@ -36,7 +36,12 @@ async function emit(rt: AgentRuntime, runId: string, type: EventType, payload: R
 function storedCall(call: ParsedToolCall): ToolCall {
   const name = modelToolName(registryToolName(call.name));
   const args = call.args && typeof call.args === 'object' ? call.args : {};
-  return { id: call.id, name, arguments: JSON.stringify(args) };
+  return {
+    id: call.id,
+    name,
+    arguments: JSON.stringify(args),
+    ...(call.thought_signature ? { thought_signature: call.thought_signature } : {}),
+  };
 }
 
 function logStep(run: RunRecord, extra: Record<string, unknown>) {

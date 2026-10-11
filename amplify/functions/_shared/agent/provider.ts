@@ -63,11 +63,27 @@ interface ChoiceMessage {
   tool_calls?: {
     id?: string;
     function?: { name?: string; arguments?: unknown };
+    extra_content?: { google?: { thought_signature?: string } };
   }[];
 }
 
-/** OpenAI-compatible providers require type and a nested function on each tool call. */
-export function toProviderMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+const SKIP_THOUGHT_SIGNATURE = 'skip_thought_signature_validator';
+
+function thoughtSignatureOf(call: {
+  thought_signature?: string;
+  extra_content?: { google?: { thought_signature?: string } };
+}): string | undefined {
+  if (typeof call.thought_signature === 'string' && call.thought_signature.trim()) return call.thought_signature.trim();
+  const nested = call.extra_content?.google?.thought_signature;
+  if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  return undefined;
+}
+
+/**
+ * OpenAI-compatible providers require type and a nested function on each tool call.
+ * Google also requires thought_signature on the first function call of each step.
+ */
+export function toProviderMessages(messages: ChatMessage[], provider?: ProviderName): Record<string, unknown>[] {
   return messages.map((message) => {
     if (message.role === 'tool') {
       return {
@@ -82,14 +98,23 @@ export function toProviderMessages(messages: ChatMessage[]): Record<string, unkn
     return {
       role: 'assistant',
       content: message.content,
-      tool_calls: message.tool_calls.map((call) => ({
-        id: call.id,
-        type: 'function',
-        function: {
-          name: call.name,
-          arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}),
-        },
-      })),
+      tool_calls: message.tool_calls.map((call, index) => {
+        const wire: Record<string, unknown> = {
+          id: call.id,
+          type: 'function',
+          function: {
+            name: call.name,
+            arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}),
+          },
+        };
+        if (provider === 'google') {
+          const signature = thoughtSignatureOf(call) || (index === 0 ? SKIP_THOUGHT_SIGNATURE : undefined);
+          if (signature) {
+            wire.extra_content = { google: { thought_signature: signature } };
+          }
+        }
+        return wire;
+      }),
     };
   });
 }
@@ -122,7 +147,7 @@ function retryAfterSeconds(res: Response): number {
   return Math.min(900, Math.max(15, Math.ceil(seconds)));
 }
 
-function parseToolCalls(message: ChoiceMessage | undefined): { id: string; name: string; args: unknown }[] {
+function parseToolCalls(message: ChoiceMessage | undefined): { id: string; name: string; args: unknown; thought_signature?: string }[] {
   const calls = message?.tool_calls;
   if (!Array.isArray(calls)) return [];
   return calls.slice(0, 2).flatMap((call, index) => {
@@ -137,7 +162,15 @@ function parseToolCalls(message: ChoiceMessage | undefined): { id: string; name:
         args = { __invalidJson: raw.slice(0, 500) };
       }
     }
-    return [{ id: call.id?.trim() || `call_${index}_${Date.now()}`, name, args }];
+    const thought_signature = thoughtSignatureOf(call);
+    return [
+      {
+        id: call.id?.trim() || `call_${index}_${Date.now()}`,
+        name,
+        args,
+        ...(thought_signature ? { thought_signature } : {}),
+      },
+    ];
   });
 }
 
@@ -194,7 +227,7 @@ export async function callModelChain(opts: {
 
     const body: Record<string, unknown> = {
       model: apiModelId(current.provider, current.model),
-      messages: toProviderMessages(opts.messages),
+      messages: toProviderMessages(opts.messages, current.provider),
       temperature: 0.2,
       tools: opts.tools,
       tool_choice: 'auto',

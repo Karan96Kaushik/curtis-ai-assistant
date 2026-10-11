@@ -26,7 +26,7 @@ const searchNotifications = z.object({
   text: z.string().max(200).optional(),
   since: z.string().max(40).optional(),
   until: z.string().max(40).optional(),
-  limit: z.number().int().min(1).max(15).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
 });
 
 const notificationDigest = z.object({
@@ -45,7 +45,7 @@ const getMore = z.object({
   text: z.string().max(200).optional(),
   since: z.string().max(40).optional(),
   until: z.string().max(40).optional(),
-  limit: z.number().int().min(1).max(15).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
 });
 
 const draftReply = z.object({

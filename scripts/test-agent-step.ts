@@ -515,9 +515,47 @@ describe('context and tool output', () => {
     const wire = toProviderMessages([
       { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', name: 'search_notifications', arguments: '{"limit":5}' }] },
     ]);
-    const call = (wire[0]?.tool_calls as { type?: string; function?: { name?: string } }[])[0];
+    const call = (wire[0]?.tool_calls as { type?: string; function?: { name?: string }; extra_content?: unknown }[])[0];
     assert.equal(call?.type, 'function');
     assert.equal(call?.function?.name, 'search_notifications');
+    assert.equal(call?.extra_content, undefined);
+
+    const googleWire = toProviderMessages(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_1',
+              name: 'update_scratchpad',
+              arguments: '{}',
+              thought_signature: 'sig-abc',
+            },
+            { id: 'call_2', name: 'search_notifications', arguments: '{}' },
+          ],
+        },
+      ],
+      'google'
+    );
+    const googleCalls = googleWire[0]?.tool_calls as {
+      extra_content?: { google?: { thought_signature?: string } };
+    }[];
+    assert.equal(googleCalls[0]?.extra_content?.google?.thought_signature, 'sig-abc');
+    assert.equal(googleCalls[1]?.extra_content, undefined);
+
+    const skipped = toProviderMessages(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call_1', name: 'update_scratchpad', arguments: '{}' }],
+        },
+      ],
+      'google'
+    );
+    const skippedCall = (skipped[0]?.tool_calls as { extra_content?: { google?: { thought_signature?: string } } }[])[0];
+    assert.equal(skippedCall?.extra_content?.google?.thought_signature, 'skip_thought_signature_validator');
   });
 
   it('keeps Google error bodies in the provider failure message', () => {

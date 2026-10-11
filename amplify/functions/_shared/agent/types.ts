@@ -69,6 +69,8 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: string;
+  /** Gemini thought signature; must be replayed on the next Google request. */
+  thought_signature?: string;
 }
 
 export interface ChatMessage {
@@ -230,6 +232,7 @@ export interface ParsedToolCall {
   id: string;
   name: string;
   args: unknown;
+  thought_signature?: string;
 }
 
 export interface ProviderFallback {
