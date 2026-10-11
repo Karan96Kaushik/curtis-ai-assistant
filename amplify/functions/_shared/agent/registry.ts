@@ -18,10 +18,14 @@ import {
   PUSH_URGENCIES,
 } from '../../../../lib/push/payload.js';
 import { sendPushToUser } from '../fcm.js';
+import { BROWSER_TEAMS_TOOLS } from './browserTeamsTools.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import { JIRA_TOOLS } from './jiraTools.js';
+import { MEMORY_TOOLS } from './memoryTools.js';
 import { formatSearchResult, replyLinkFromNotification } from './notificationStore.js';
 import { RELEASE_TOOLS } from './releaseTools.js';
+import { TIMESHEET_TOOLS } from './timesheetTools.js';
+import { WEB_TOOLS } from './webTools.js';
 import type { EmailDetail, EmailListItem, EmailReader, ModelTool, ProfileSnapshot, ToolDef } from './types.js';
 import { capText, wrapUntrusted } from './text.js';
 
@@ -523,6 +527,10 @@ export const TOOLS: ToolDef[] = [
   ...GITHUB_TOOLS,
   ...JIRA_TOOLS,
   ...RELEASE_TOOLS,
+  ...WEB_TOOLS,
+  ...MEMORY_TOOLS,
+  ...TIMESHEET_TOOLS,
+  ...BROWSER_TEAMS_TOOLS,
 ];
 
 for (const tool of PERMISSION_TOOLS) {

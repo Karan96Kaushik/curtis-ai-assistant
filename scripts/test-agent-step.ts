@@ -607,6 +607,28 @@ describe('notification store helpers', () => {
     const executePending = TOOLS.find((tool) => tool.name === 'wf_release_execute_pending');
     assert.equal(executePending?.egress, true);
     assert.equal(executePending?.available === false, false);
+
+    const other = profile({
+      allowed_tools: ['web_search', 'web_fetch_page', 'memory_read', 'timesheet_draft', 'browser_status', 'teams_list_chats'],
+      system_prompt: 'Other tools.',
+    });
+    const otherTools = toModelTools(toolsForProfile(other)).map((tool) => tool.function.name);
+    for (const name of [
+      'web_search',
+      'web_fetch_page',
+      'memory_read',
+      'timesheet_draft',
+      'browser_status',
+      'teams_list_chats',
+    ]) {
+      assert.ok(otherTools.includes(name), name);
+      assert.equal(TOOLS.find((tool) => tool.name === name)?.available === false, false, name);
+    }
+    assert.equal(
+      PERMISSION_TOOLS.filter((tool) => !tool.connected).length,
+      0,
+      'all catalog tools should be connected'
+    );
   });
 });
 

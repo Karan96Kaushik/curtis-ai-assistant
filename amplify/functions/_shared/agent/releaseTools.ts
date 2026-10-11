@@ -201,7 +201,7 @@ export const RELEASE_TOOLS: ToolDef[] = [
       .object({
         workflowId: workflowId,
         type: z.enum(['execute_step', 'execute_draft']),
-        payload: z.record(z.unknown()).optional(),
+        payload: z.record(z.string(), z.unknown()).optional(),
       })
       .passthrough(),
     maxResultChars: 12000,

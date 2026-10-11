@@ -13,7 +13,7 @@ import { extractIssueKeys } from '../../../../src/util/jiraKeys.js';
 import { runLocalTask } from '../../../../src/util/runLocalTask.js';
 import type { ToolDef } from './types.js';
 
-type TaskFn = (payload: Record<string, unknown>) => Promise<unknown>;
+type TaskFn = (payload: object) => Promise<unknown>;
 type FormatFn = (raw: unknown) => string;
 type FormattedTask = TaskFn & { formatResult: FormatFn };
 
