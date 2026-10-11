@@ -15,7 +15,12 @@ import {
   validateProfile,
 } from '@/amplify/functions/_shared/agent/profileRules';
 import { agentApiConfigured } from '@/lib/amplify/client';
-import { analyzeProfileRun, saveAgentProfile, type ProfileRunSuggestion } from '@/lib/amplify/agent-functions';
+import {
+  analyzeProfileRun,
+  improveAgentPrompt,
+  saveAgentProfile,
+  type ProfileRunSuggestion,
+} from '@/lib/amplify/agent-functions';
 import { chainFromModelIds, DEFAULT_MODEL_IDS, modelIdsFromChain, providersInChain } from '@/lib/agents/modelChain';
 import {
   INBOX_TOOLS,
@@ -62,6 +67,8 @@ export default function ProfileEditorView() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [promptUndo, setPromptUndo] = useState<string | null>(null);
+  const [improvingPrompt, setImprovingPrompt] = useState(false);
   const [modelIds, setModelIds] = useState<string[]>([...DEFAULT_MODEL_IDS]);
   const [showErrors, setShowErrors] = useState(false);
   const [allowed, setAllowed] = useState<string[]>([...INBOX_TOOLS]);
@@ -87,6 +94,7 @@ export default function ProfileEditorView() {
         setName(profile.name);
         setDescription(profile.description ?? '');
         setPrompt(profile.system_prompt);
+        setPromptUndo(null);
         const ids = modelIdsFromChain(profile.model_chain);
         setModelIds(ids.length ? ids : [...DEFAULT_MODEL_IDS]);
         const tools = normalizeAllowedTools(profile.allowed_tools ?? []);
@@ -174,6 +182,36 @@ export default function ProfileEditorView() {
 
   function toggleApproval(name: string) {
     setApproval(approvalSet.has(name) ? approval.filter((item) => item !== name) : [...approval, name]);
+  }
+
+  async function improveInstructions() {
+    const source = prompt.trim();
+    if (!source) {
+      toast.error('Write some instructions first.');
+      return;
+    }
+    setImprovingPrompt(true);
+    try {
+      const before = prompt;
+      const next = await improveAgentPrompt({
+        systemPrompt: source,
+        profileId,
+        modelIds,
+      });
+      setPromptUndo(before);
+      setPrompt(next.system_prompt);
+      toast.success(`Improved (${next.word_count} words, max ${next.max_words}).`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImprovingPrompt(false);
+    }
+  }
+
+  function undoImprove() {
+    if (promptUndo == null) return;
+    setPrompt(promptUndo);
+    setPromptUndo(null);
   }
 
   async function analyze() {
@@ -291,10 +329,29 @@ export default function ProfileEditorView() {
             Description
             <Input value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Instructions
+          <div className="flex flex-col gap-1 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Instructions</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="ml-auto"
+                disabled={improvingPrompt || !agentApiConfigured || !prompt.trim()}
+                onClick={() => void improveInstructions()}
+              >
+                {improvingPrompt ? <Loader2 className="animate-spin" /> : null}
+                Improve with AI
+              </Button>
+              {promptUndo != null && (
+                <Button type="button" size="sm" variant="ghost" disabled={improvingPrompt} onClick={undoImprove}>
+                  Undo
+                </Button>
+              )}
+            </div>
             <Textarea value={prompt} maxLength={4000} onChange={(event) => setPrompt(event.target.value)} />
-          </label>
+            <p className="text-xs text-muted-foreground">Improve rewrites for clarity and keeps at most twice the current word count.</p>
+          </div>
         </CardContent>
       </Card>
 

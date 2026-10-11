@@ -97,6 +97,7 @@ Turning a write on in the editor also requires approval until that box is cleare
 | `approval` | `approve` or `deny` a run in `waiting_approval` |
 | `cancel` / `retry` / `save_profile` | As named |
 | `analyze_profile_run` | LLM-only review of **one** finished run. Returns suggested Instructions. Does not write the profile |
+| `improve_prompt` | Rewrite Instructions for clarity. Result is clamped to at most 2× the source word count. Does not write the profile |
 
 UI: `/agents`, `/agents/runs/:runId`, `/agents/profiles/new`, `/agents/profiles/:profileId`.
 

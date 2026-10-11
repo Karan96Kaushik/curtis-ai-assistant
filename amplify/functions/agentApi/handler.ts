@@ -1,5 +1,5 @@
 import { HttpError, json, parseBody, withHttp } from '../_shared/http.js';
-import { analyzeProfileRun } from '../_shared/agent/profileAnalytics.js';
+import { analyzeProfileRun, improvePrompt } from '../_shared/agent/profileAnalytics.js';
 import { AgentInputError, answerRun, cancelRun, createRun, decideApproval, retryRun, saveProfile } from '../_shared/agent/runs.js';
 import { productionRuntime } from '../_shared/agent/runtime.js';
 import { requireAllowedCaller } from '../_shared/verifySupabaseAuth.js';
@@ -61,6 +61,14 @@ export const handler = withHttp('agentApi', async (event) => {
     if (body.action === 'analyze_profile_run') {
       const suggestion = await analyzeProfileRun(rt, caller.userId, asId(body.id));
       return json(200, suggestion);
+    }
+    if (body.action === 'improve_prompt') {
+      const improved = await improvePrompt(rt, caller.userId, {
+        system_prompt: body.system_prompt,
+        profile_id: body.profile_id || body.id,
+        model_ids: Array.isArray(body.model_ids) ? body.model_ids.filter((id): id is string => typeof id === 'string') : undefined,
+      });
+      return json(200, improved);
     }
     if (body.action === 'save_profile') {
       const profile = await saveProfile(rt, caller.userId, {

@@ -1,9 +1,11 @@
+import { chainFromModelIds } from '../../../../lib/agents/modelChain.js';
 import { CORE_RULES } from './context.js';
 import type { AgentRuntime } from './deps.js';
 import { redactSensitive } from './notificationStore.js';
+import { defaultModelChain } from './profileRules.js';
 import { AgentInputError } from './runs.js';
 import { preview, redactValue } from './text.js';
-import type { AgentEvent, ProfileSnapshot, RunRecord, RunStatus } from './types.js';
+import type { AgentEvent, ProfileSnapshot, ProviderName, RunRecord, RunStatus } from './types.js';
 
 export const ANALYZE_EVENT_CAP = 80;
 export const SUGGESTED_PROMPT_MAX = 4000;
@@ -156,6 +158,99 @@ function analysisSystemPrompt(): string {
     'Keep useful existing instructions. Do not invent tools, permissions, or facts that are not in the pack.',
     'Do not include notification bodies, secrets, or untrusted_data in the suggestion.',
   ].join(' ');
+}
+
+export function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Hard cap: keep at most maxWords, preserving early wording. */
+export function clampToMaxWords(text: string, maxWords: number): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return text.trim();
+  return words.slice(0, Math.max(1, maxWords)).join(' ');
+}
+
+function improveSystemPrompt(maxWords: number): string {
+  return [
+    'Rewrite the agent Instructions to be clearer and more actionable.',
+    'Return the improved Instructions only — no JSON, no markdown fences, no commentary.',
+    `At most ${maxWords} words (at most double the original). Prefer fewer words when possible.`,
+    'Keep the intent. Do not invent tools, permissions, or facts.',
+    'Do not contradict these core rules:',
+    CORE_RULES,
+  ].join(' ');
+}
+
+function profileForImprove(
+  live: ProfileSnapshot | null,
+  modelIds: string[] | undefined
+): ProfileSnapshot {
+  if (live) return live;
+  const { chain } = chainFromModelIds(modelIds ?? []);
+  const model_chain = chain.length ? chain : defaultModelChain();
+  const allowed_providers = [...new Set(model_chain.map((entry) => entry.provider))] as ProviderName[];
+  return {
+    id: 'improve',
+    name: 'Improve',
+    description: null,
+    system_prompt: 'Improve instructions.',
+    allowed_tools: [],
+    approval_required: [],
+    allowed_apps: [],
+    model_chain,
+    allowed_providers,
+    max_steps: 5,
+    max_runtime_min: 5,
+    token_budget: 8000,
+    resource_scopes: {},
+  };
+}
+
+/**
+ * LLM rewrite of Instructions. Result is clamped to at most 2× the source word count
+ * and 4000 characters. Does not write the profile.
+ */
+export async function improvePrompt(
+  rt: AgentRuntime,
+  userId: string,
+  input: { system_prompt?: string; profile_id?: string; model_ids?: string[] }
+): Promise<{ system_prompt: string; word_count: number; max_words: number }> {
+  const source = (input.system_prompt ?? '').trim();
+  if (!source || source.length > SUGGESTED_PROMPT_MAX) {
+    throw new AgentInputError(`Instructions must be 1–${SUGGESTED_PROMPT_MAX} characters.`);
+  }
+  const sourceWords = countWords(source);
+  const maxWords = Math.max(1, sourceWords * 2);
+
+  let live: ProfileSnapshot | null = null;
+  const profileId = input.profile_id?.trim();
+  if (profileId) {
+    live = await rt.store.loadProfile(profileId, userId);
+    if (!live) throw new AgentInputError('Profile not found', 404);
+  }
+
+  const out = await rt.callModel(
+    profileForImprove(live, input.model_ids),
+    [
+      { role: 'system', content: improveSystemPrompt(maxWords) },
+      { role: 'user', content: source },
+    ],
+    []
+  );
+  if (out.kind === 'rate_limited') {
+    throw new AgentInputError('The model is rate limited. Try again shortly.', 429);
+  }
+  if (out.kind !== 'ok') {
+    throw new AgentInputError(out.message || 'The model could not improve these instructions.', 502);
+  }
+
+  let improved = out.text.trim();
+  improved = improved.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  if (!improved) throw new AgentInputError('The model returned empty instructions.');
+  improved = clampToMaxWords(improved, maxWords).slice(0, SUGGESTED_PROMPT_MAX);
+  if (!improved) throw new AgentInputError('The model returned empty instructions.');
+  return { system_prompt: improved, word_count: countWords(improved), max_words: maxWords };
 }
 
 export async function analyzeProfileRun(

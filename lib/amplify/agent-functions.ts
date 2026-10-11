@@ -35,6 +35,19 @@ export async function analyzeProfileRun(id: string): Promise<ProfileRunSuggestio
   return callFunction('agentApi', { action: 'analyze_profile_run', id });
 }
 
+export async function improveAgentPrompt(input: {
+  systemPrompt: string;
+  profileId?: string;
+  modelIds?: string[];
+}): Promise<{ system_prompt: string; word_count: number; max_words: number }> {
+  return callFunction('agentApi', {
+    action: 'improve_prompt',
+    system_prompt: input.systemPrompt,
+    profile_id: input.profileId,
+    model_ids: input.modelIds,
+  });
+}
+
 export interface SaveAgentProfileInput {
   id?: string;
   name: string;

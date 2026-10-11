@@ -19,7 +19,14 @@ import {
   type NotificationStore,
 } from '../amplify/functions/_shared/agent/notificationStore.js';
 import { egressToolNames, ensureEgressApproval, normalizeAllowedTools, validateProfile } from '../amplify/functions/_shared/agent/profileRules.js';
-import { analyzeProfileRun, buildAnalysisPack, parseAnalysisSuggestion } from '../amplify/functions/_shared/agent/profileAnalytics.js';
+import {
+  analyzeProfileRun,
+  buildAnalysisPack,
+  clampToMaxWords,
+  countWords,
+  improvePrompt,
+  parseAnalysisSuggestion,
+} from '../amplify/functions/_shared/agent/profileAnalytics.js';
 import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
 import { answerRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
@@ -824,6 +831,40 @@ describe('stale running recovery', () => {
 });
 
 describe('profile analytics', () => {
+  it('clamps improved prompts to at most double the word count', () => {
+    assert.equal(countWords('one two three'), 3);
+    assert.equal(clampToMaxWords('a b c d e f', 3), 'a b c');
+    assert.equal(clampToMaxWords('short', 10), 'short');
+  });
+
+  it('improves instructions without writing the profile', async () => {
+    const long =
+      'Triage notifications carefully and always check the app stats first then search the important apps and summarize for the user with clear next steps.';
+    const { store, rt } = scripted([
+      {
+        kind: 'ok',
+        text: `${long} ${long} ${long}`,
+        toolCalls: [],
+        usage: { provider: 'groq', model: 'openai/gpt-oss-20b', tokens: 20, latencyMs: 5 },
+        fallbacks: [],
+      },
+    ]);
+    await store.insertProfile({
+      ...profile(),
+      user_id: 'user-1',
+      is_system: false,
+      is_default: false,
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    });
+    const source = 'Triage notifications. Prefer WhatsApp.';
+    const max = countWords(source) * 2;
+    const improved = await improvePrompt(rt, 'user-1', { system_prompt: source, profile_id: 'profile-1' });
+    assert.ok(countWords(improved.system_prompt) <= max);
+    assert.equal(improved.max_words, max);
+    assert.equal((await store.loadProfile('profile-1', 'user-1'))?.system_prompt, 'Triage notifications.');
+  });
+
   it('redacts untrusted notification text and parses a suggestion', () => {
     const pack = buildAnalysisPack(
       run({ status: 'done', result_summary: 'Finished.', command: 'Check inbox' }),
