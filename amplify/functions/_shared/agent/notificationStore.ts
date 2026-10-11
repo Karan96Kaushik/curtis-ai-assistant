@@ -147,22 +147,50 @@ function formatCoverage(coverage: CoverageNote): string {
   return coverage.text;
 }
 
-async function loadCoverage(db: SupabaseClient, userId: string, now: Date): Promise<CoverageNote> {
-  const nowMs = now.getTime();
-  let lastDataAt: string | null = null;
-  const latest = await db
+function agoLabel(nowMs: number, thenMs: number): string {
+  const mins = Math.max(0, Math.round((nowMs - thenMs) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function rowTimestampIso(row: { posted_at?: number | string | null; created_at?: number | string | null }): string | null {
+  const posted = postedAtMs(row.posted_at);
+  const created = postedAtMs(row.created_at);
+  const best = Math.max(posted ?? 0, created ?? 0);
+  return best > 0 ? new Date(best).toISOString() : null;
+}
+
+async function loadLatestNotificationAt(db: SupabaseClient, userId: string): Promise<string | null> {
+  const byPosted = await db
     .from('notifications')
     .select('posted_at, created_at')
     .eq('user_id', userId)
-    .order('posted_at', { ascending: false })
+    .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
-  if (!latest.error && latest.data) {
-    lastDataAt = postedAtIso(
-      (latest.data as { posted_at?: number | string | null; created_at?: number | string | null }).posted_at ??
-        (latest.data as { created_at?: number | string | null }).created_at
-    );
+  if (!byPosted.error && byPosted.data) {
+    const iso = rowTimestampIso(byPosted.data as { posted_at?: number | string | null; created_at?: number | string | null });
+    if (iso) return iso;
   }
+  const byCreated = await db
+    .from('notifications')
+    .select('posted_at, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (!byCreated.error && byCreated.data) {
+    return rowTimestampIso(byCreated.data as { posted_at?: number | string | null; created_at?: number | string | null });
+  }
+  return null;
+}
+
+async function loadCoverage(db: SupabaseClient, userId: string, now: Date): Promise<CoverageNote> {
+  const nowMs = now.getTime();
+  const lastDataAt = await loadLatestNotificationAt(db, userId);
 
   let lastDeviceSyncAt: string | null = null;
   const device = await db
@@ -177,17 +205,14 @@ async function loadCoverage(db: SupabaseClient, userId: string, now: Date): Prom
   }
 
   const dataMs = lastDataAt ? Date.parse(lastDataAt) : NaN;
-  const syncMs = lastDeviceSyncAt ? Date.parse(lastDeviceSyncAt) : NaN;
-  const freshest = Math.max(Number.isFinite(dataMs) ? dataMs : 0, Number.isFinite(syncMs) ? syncMs : 0);
-  const stale = !freshest || nowMs - freshest > STALE_SYNC_MS;
-  const through = lastDataAt ? new Date(lastDataAt).toISOString().slice(11, 16) : 'unknown';
-  const syncAgo =
-    Number.isFinite(syncMs) && syncMs > 0
-      ? `${Math.max(1, Math.round((nowMs - syncMs) / 60_000))} min ago`
-      : 'no device token';
-  const warn = stale ? ' Warning: listener may be down or the phone is offline.' : '';
+  const tokenMs = lastDeviceSyncAt ? Date.parse(lastDeviceSyncAt) : NaN;
+  // Freshness of the listener is the latest notification row — not FCM token refresh.
+  const stale = !Number.isFinite(dataMs) || nowMs - dataMs > STALE_SYNC_MS;
+  const lastNotification = Number.isFinite(dataMs) ? agoLabel(nowMs, dataMs) : 'none found';
+  const pushToken = Number.isFinite(tokenMs) ? agoLabel(nowMs, tokenMs) : 'none registered';
+  const warn = stale ? ' Warning: no recent notifications — listener may be down or the phone is offline.' : '';
   return {
-    text: `Coverage: data complete through ${through} UTC; last device sync ${syncAgo}.${warn}`,
+    text: `Coverage: last notification ${lastNotification}; push token refreshed ${pushToken}.${warn}`,
     stale,
     lastDataAt,
     lastDeviceSyncAt,
