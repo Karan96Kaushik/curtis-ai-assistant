@@ -247,6 +247,9 @@ export default function RunDetailView() {
   const maxSteps = snapshotLimit(run.profile_snapshot, 'max_steps');
   const budget = snapshotLimit(run.profile_snapshot, 'token_budget');
   const open = run.status === 'queued' || run.status === 'running' || run.status === 'waiting_input' || run.status === 'waiting_approval';
+  const lastEventAt = events.at(-1)?.created_at ?? run.updated_at;
+  const quietMs = Date.now() - Date.parse(lastEventAt);
+  const quietRunning = (run.status === 'running' || run.status === 'queued') && Number.isFinite(quietMs) && quietMs > 60_000;
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto px-4 py-6">
@@ -277,6 +280,13 @@ export default function RunDetailView() {
           {run.tokens_used} tokens{budget ? ` / ${budget}` : ''}
         </span>
       </div>
+
+      {quietRunning && (
+        <p className="text-sm text-muted-foreground">
+          No new steps for {Math.round(quietMs / 60_000)} min. The worker may still be calling a model, or the queue dropped this
+          run. Cancel and retry if it stays stuck.
+        </p>
+      )}
 
       {run.status === 'failed' && (
         <Card>

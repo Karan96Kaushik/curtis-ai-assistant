@@ -32,17 +32,18 @@ stepFn.addEventSource(
     maxConcurrency: 2,
   })
 );
+const tickFn = backend.scheduleTick.resources.lambda;
 agentQueue.grantSendMessages(stepFn);
 agentQueue.grantSendMessages(backend.agentApi.resources.lambda);
 agentQueue.grantSendMessages(backend.runScheduledJob.resources.lambda);
-for (const fn of [stepFn, backend.agentApi.resources.lambda, backend.runScheduledJob.resources.lambda]) {
+agentQueue.grantSendMessages(tickFn);
+for (const fn of [stepFn, backend.agentApi.resources.lambda, backend.runScheduledJob.resources.lambda, tickFn]) {
   (fn as IFunction & { addEnvironment(key: string, value: string): void }).addEnvironment(
     'AGENT_STEP_QUEUE_URL',
     agentQueue.queueUrl
   );
 }
 
-const tickFn = backend.scheduleTick.resources.lambda;
 const runnerFn = backend.runScheduledJob.resources.lambda;
 runnerFn.grantInvoke(tickFn);
 (tickFn as IFunction & { addEnvironment(key: string, value: string): void }).addEnvironment(

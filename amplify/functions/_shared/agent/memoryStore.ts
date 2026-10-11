@@ -124,6 +124,15 @@ export class MemoryAgentStore implements AgentStore {
     if (!profile || profile.user_id !== userId) return null;
     return clone(profile);
   }
+
+  async listStaleRuns(olderThanIso: string, limit = 20): Promise<RunRecord[]> {
+    return clone(
+      [...this.runs.values()]
+        .filter((run) => (run.status === 'queued' || run.status === 'running') && run.updated_at < olderThanIso)
+        .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
+        .slice(0, Math.min(50, Math.max(1, limit)))
+    );
+  }
 }
 
 export function eventsOf(store: MemoryAgentStore, runId: string, type?: EventType): AgentEvent[] {

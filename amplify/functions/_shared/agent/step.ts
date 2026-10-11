@@ -72,8 +72,13 @@ export async function handleStep(
   if (run.status !== 'running' && run.status !== 'queued') return { outcome: 'ignored' };
 
   if (run.step_count !== input.expected_step) {
-    if (run.status === 'running' && run.step_count === input.expected_step + 1) {
-      await rt.enqueue({ run_id: run.id, expected_step: run.step_count, dedupNonce: 'next' });
+    if ((run.status === 'running' || run.status === 'queued') && run.step_count > input.expected_step) {
+      // Unique nonce: FIFO drops a repeated `next` id for five minutes.
+      await rt.enqueue({
+        run_id: run.id,
+        expected_step: run.step_count,
+        dedupNonce: `heal:${rt.now().toISOString()}`,
+      });
     }
     return { outcome: 'duplicate' };
   }
@@ -108,6 +113,10 @@ export async function handleStep(
   }
 
   run.next_attempt_at = null;
+  const heartbeat = await rt.store.save(run);
+  if (!heartbeat) return { outcome: 'lost_race' };
+  await emit(rt, run.id, 'thought', { text: `Step ${run.step_count + 1}: calling model.` });
+
   const tools = toolsForProfile(profile, rt.tools);
   const prompt = buildContext(run);
   const out = await rt.callModel(profile, prompt, toModelTools(tools));
@@ -245,7 +254,17 @@ async function continueRun(
     await emit(rt, run.id, 'summary', { chars: run.summary.length });
   }
   const saved = await rt.store.save(run);
-  if (!saved) return { outcome: 'lost_race' };
+  if (!saved) {
+    const fresh = await rt.store.loadRun(run.id);
+    if (fresh && (fresh.status === 'running' || fresh.status === 'queued')) {
+      await rt.enqueue({
+        run_id: fresh.id,
+        expected_step: fresh.step_count,
+        dedupNonce: `heal:${rt.now().toISOString()}`,
+      });
+    }
+    return { outcome: 'lost_race' };
+  }
   await rt.enqueue({ run_id: run.id, expected_step: run.step_count, dedupNonce: 'next' });
   logStep(run, {
     outcome: 'continued',
@@ -277,6 +296,14 @@ async function complete(
   await safeNotify(rt, run, 'done', summary);
   logStep(run, { outcome: 'done', provider: usage.provider, model: usage.model, latency_ms: usage.latencyMs, tokens: usage.tokens });
   return { outcome: 'done' };
+}
+
+export async function failActiveRun(rt: AgentRuntime, runId: string, err: unknown): Promise<boolean> {
+  const run = await rt.store.loadRun(runId);
+  if (!run || (run.status !== 'queued' && run.status !== 'running')) return false;
+  const message = err instanceof Error && err.message.trim() ? err.message.trim() : 'step_failed';
+  await fail(rt, run, message, rt.now());
+  return true;
 }
 
 async function fail(rt: AgentRuntime, run: RunRecord, code: string, now: Date): Promise<StepOutcome> {

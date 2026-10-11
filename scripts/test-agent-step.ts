@@ -19,7 +19,8 @@ import { analyzeProfileRun, buildAnalysisPack, parseAnalysisSuggestion } from '.
 import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
 import { answerRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
-import { handleStep } from '../amplify/functions/_shared/agent/step.js';
+import { recoverStaleRuns } from '../amplify/functions/_shared/agent/stall.js';
+import { failActiveRun, handleStep } from '../amplify/functions/_shared/agent/step.js';
 import { capText, wrapUntrusted } from '../amplify/functions/_shared/agent/text.js';
 import type { EmailReader, EnqueueMessage, ModelTurn, ProfileSnapshot, RunRecord, ToolDef } from '../amplify/functions/_shared/agent/types.js';
 
@@ -244,6 +245,7 @@ describe('agent step loop', () => {
 
     const done = await handleStep({ run_id: 'run-1', expected_step: 1 }, harness.rt);
     assert.equal(done.outcome, 'done');
+    assert.ok(eventsOf(harness.store, 'run-1', 'thought').some((event) => String(event.payload.text).includes('calling model')));
     const finished = await harness.store.loadRun('run-1');
     assert.equal(finished?.status, 'done');
     assert.equal(finished?.result_summary, 'One invoice from Gmail.');
@@ -700,6 +702,56 @@ describe('profiles', () => {
 
     const started = await createRun(rt, 'user-1', 'Check notifications');
     assert.equal(started.profile_id, second.id);
+  });
+});
+
+describe('stale running recovery', () => {
+  it('re-enqueues a quiet running run and fails one past max runtime', async () => {
+    const harness = scripted([]);
+    await harness.store.insertRun(
+      run({
+        status: 'running',
+        step_count: 3,
+        started_at: NOW.toISOString(),
+        updated_at: new Date(NOW.getTime() - 5 * 60_000).toISOString(),
+      })
+    );
+    const recovered = await recoverStaleRuns(harness.rt, NOW);
+    assert.equal(recovered.recovered, 1);
+    assert.equal(harness.enqueued.at(-1)?.expected_step, 3);
+    assert.match(harness.enqueued.at(-1)?.dedupNonce ?? '', /^recover:/);
+
+    const stale = run({
+      id: 'run-2',
+      status: 'running',
+      started_at: new Date(NOW.getTime() - 2 * 60 * 60_000).toISOString(),
+      updated_at: new Date(NOW.getTime() - 5 * 60_000).toISOString(),
+      profile_snapshot: profile({ max_runtime_min: 60 }),
+    });
+    await harness.store.insertRun(stale);
+    const over = await recoverStaleRuns(harness.rt, NOW);
+    assert.equal(over.failed, 1);
+    assert.equal((await harness.store.loadRun('run-2'))?.status, 'failed');
+  });
+
+  it('marks a running run failed after an unexpected step error', async () => {
+    const harness = scripted([]);
+    await harness.store.insertRun(run({ status: 'running' }));
+    const marked = await failActiveRun(harness.rt, 'run-1', new Error('lambda timed out'));
+    assert.equal(marked, true);
+    const saved = await harness.store.loadRun('run-1');
+    assert.equal(saved?.status, 'failed');
+    assert.match(saved?.error ?? '', /lambda timed out/);
+  });
+
+  it('heals a skipped expected_step with a unique enqueue nonce', async () => {
+    const harness = scripted([ok('finish', { summary: 'Done.' })]);
+    await harness.store.insertRun(run({ status: 'running', step_count: 2 }));
+    const result = await handleStep({ run_id: 'run-1', expected_step: 0 }, harness.rt);
+    assert.equal(result.outcome, 'duplicate');
+    assert.equal(harness.modelCalls(), 0);
+    assert.equal(harness.enqueued.at(-1)?.expected_step, 2);
+    assert.match(harness.enqueued.at(-1)?.dedupNonce ?? '', /^heal:/);
   });
 });
 

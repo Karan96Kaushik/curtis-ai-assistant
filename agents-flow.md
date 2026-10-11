@@ -117,7 +117,9 @@ The editor shows the suggestion. **Apply** copies it into Instructions in the pa
 6. Call the model with connected, allowed tools.
 7. Pause, finish, fail, or enqueue `expected_step = step_count`.
 
-SQS is FIFO. `MessageGroupId` is the run id. Dedup id is `run_id:expected_step:nonce` (`start`, `next`, `resume:<time>`, `wait:<next_attempt_at>`). Visibility 180s, Lambda timeout 90s, batch size 1, DLQ after 3 receives.
+SQS is FIFO. `MessageGroupId` is the run id. Dedup id is `run_id:expected_step:nonce` (`start`, `next`, `resume:<time>`, `wait:<next_attempt_at>`, `heal:<time>`, `recover:<time>`). Visibility 180s, Lambda timeout 120s, batch size 1, DLQ after 3 receives.
+
+A step emits a short `thought` before the model call so the run page moves. If the Lambda throws, the run is marked `failed` instead of staying `running`. `scheduleTick` re-enqueues queued/running rows whose `updated_at` is older than 4 minutes (or fails them when max runtime is past).
 
 ## Model chain
 
@@ -173,6 +175,6 @@ These stay on the roadmap from the notification revision and earlier hardening n
 - Per-profile `remember` / `recall` memory table
 - Notification event triggers (DB webhook → `agentApi create`) with debounce, concurrency cap, and daily run limit
 - Retention TTL on `notifications` and agent `messages`
-- DLQ consumer that marks stuck runs failed and pushes
+- Dedicated DLQ consumer (stall reclaim currently runs from `scheduleTick`)
 - Crash-safe step replay: persist model response before tool execution with the `step_count` bump
 - Cut the last-N window on assistant-turn boundaries; schedule depth/overlap policy; per-attempt model timeouts with a longer SQS visibility timeout

@@ -1,4 +1,6 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import { productionRuntime } from '../_shared/agent/runtime.js';
+import { recoverStaleRuns } from '../_shared/agent/stall.js';
 import { requireEnv } from '../_shared/secrets.js';
 import { claimDueJobs, reclaimStaleJobs, type ScheduledJobRecord } from '../_shared/scheduledJobs.js';
 import { supabaseAsService } from '../_shared/supabaseUser.js';
@@ -21,6 +23,14 @@ async function releaseClaim(job: ScheduledJobRecord): Promise<void> {
 export const handler = async (): Promise<{ claimed: number; started: number }> => {
   const db = supabaseAsService();
   await reclaimStaleJobs(db);
+  try {
+    const recovered = await recoverStaleRuns(productionRuntime());
+    if (recovered.recovered || recovered.failed) {
+      console.log(`[schedule-tick] agent recover ${recovered.recovered} requeued, ${recovered.failed} failed`);
+    }
+  } catch (err) {
+    console.error('[schedule-tick] agent recover failed:', err instanceof Error ? err.message : err);
+  }
   const jobs = await claimDueJobs(db, 5);
   const functionName = requireEnv('RUN_SCHEDULED_JOB_FUNCTION_NAME');
   let started = 0;

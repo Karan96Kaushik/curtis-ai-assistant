@@ -184,6 +184,7 @@ export interface AgentStore {
   insertProfile(profile: ProfileRecord): Promise<void>;
   updateProfile(profile: ProfileRecord): Promise<boolean>;
   loadProfile(id: string, userId: string): Promise<ProfileRecord | null>;
+  listStaleRuns(olderThanIso: string, limit?: number): Promise<RunRecord[]>;
 }
 
 export class SupabaseAgentStore implements AgentStore {
@@ -391,6 +392,21 @@ export class SupabaseAgentStore implements AgentStore {
     const { data, error } = await this.db.from('agent_profiles').select('*').eq('id', id).eq('user_id', userId).maybeSingle();
     if (error) throw new Error(error.message);
     return data ? profileFromRow(data as Row) : null;
+  }
+
+  async listStaleRuns(olderThanIso: string, limit = 20): Promise<RunRecord[]> {
+    const { data, error } = await this.db
+      .from('agent_runs')
+      .select('*')
+      .in('status', ['queued', 'running'])
+      .lt('updated_at', olderThanIso)
+      .order('updated_at', { ascending: true })
+      .limit(Math.min(50, Math.max(1, limit)));
+    if (error) throw new Error(error.message);
+    return (data ?? []).flatMap((row) => {
+      const parsed = runFromRow(row as Row);
+      return parsed ? [parsed] : [];
+    });
   }
 }
 
