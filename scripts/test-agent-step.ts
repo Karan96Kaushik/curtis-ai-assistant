@@ -556,6 +556,20 @@ describe('context and tool output', () => {
     );
     const skippedCall = (skipped[0]?.tool_calls as { extra_content?: { google?: { thought_signature?: string } } }[])[0];
     assert.equal(skippedCall?.extra_content?.google?.thought_signature, 'skip_thought_signature_validator');
+
+    const withToolResult = toProviderMessages(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call_1', name: 'search_notifications', arguments: '{}' }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: '[]' },
+      ],
+      'google'
+    );
+    assert.equal(withToolResult[0]?.content, '');
+    assert.equal((withToolResult[1] as { name?: string }).name, 'search_notifications');
   });
 
   it('keeps Google error bodies in the provider failure message', () => {

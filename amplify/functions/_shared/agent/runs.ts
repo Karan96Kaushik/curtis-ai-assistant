@@ -10,7 +10,7 @@ import {
   validateProfile,
   type ProfileDraft,
 } from './profileRules.js';
-import { knownToolNames, registryToolName, TOOLS } from './registry.js';
+import { knownToolNames, modelToolName, registryToolName, TOOLS } from './registry.js';
 import { redactValue, sanitizeToolError } from './text.js';
 import type { EventType, ProfileRecord, RunRecord, RunTrigger } from './types.js';
 
@@ -121,7 +121,15 @@ export async function answerRun(rt: AgentRuntime, userId: string, runId: string,
   }
   const answer = text.trim();
   if (!answer || answer.length > 4000) throw new AgentInputError('Answer must be 1–4000 characters.');
-  const messages = [...run.messages, { role: 'tool' as const, tool_call_id: run.pending_request.tool_call_id, content: answer }];
+  const messages = [
+    ...run.messages,
+    {
+      role: 'tool' as const,
+      tool_call_id: run.pending_request.tool_call_id,
+      name: modelToolName('ask_user'),
+      content: answer,
+    },
+  ];
   const moved = await rt.store.transition(run.id, ['waiting_input'], 'running', { messages, pending_request: null });
   if (!moved) throw new AgentInputError('This run is not waiting for an answer', 409);
   await record(rt, run.id, 'answer', { text: answer.slice(0, 500) });
@@ -164,7 +172,15 @@ export async function decideApproval(
     } catch (err) {
       text = sanitizeToolError(err);
     }
-    moved.messages = [...moved.messages, { role: 'tool', tool_call_id: pending.tool_call_id, content: text }];
+    moved.messages = [
+      ...moved.messages,
+      {
+        role: 'tool',
+        tool_call_id: pending.tool_call_id,
+        name: modelToolName(registryToolName(def.name)),
+        content: text,
+      },
+    ];
     const saved = await rt.store.save(moved);
     if (!saved) throw new AgentInputError('This run changed before the action could be saved', 409);
     await record(rt, run.id, 'approval', { decision: 'approve', tool: def.name });
@@ -172,7 +188,15 @@ export async function decideApproval(
     return moved;
   }
 
-  const messages = [...run.messages, { role: 'tool' as const, tool_call_id: pending.tool_call_id, content }];
+  const messages = [
+    ...run.messages,
+    {
+      role: 'tool' as const,
+      tool_call_id: pending.tool_call_id,
+      name: modelToolName(registryToolName(def.name)),
+      content,
+    },
+  ];
   const moved = await rt.store.transition(run.id, ['waiting_approval'], 'running', { messages, pending_request: null });
   if (!moved) throw new AgentInputError('This run is not waiting for approval', 409);
   await record(rt, run.id, 'approval', { decision: 'deny', tool: def.name });

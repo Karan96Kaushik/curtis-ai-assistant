@@ -44,6 +44,15 @@ function storedCall(call: ParsedToolCall): ToolCall {
   };
 }
 
+function toolResultMessage(callId: string, toolName: string, content: string): ChatMessage {
+  return {
+    role: 'tool',
+    tool_call_id: callId,
+    name: modelToolName(registryToolName(toolName)),
+    content,
+  };
+}
+
 function logStep(run: RunRecord, extra: Record<string, unknown>) {
   console.log(JSON.stringify({ run_id: run.id, step: run.step_count, ...extra }));
 }
@@ -161,14 +170,14 @@ export async function handleStep(
     const allowed = toolAllowed(profile, name);
     if (!def || !allowed) {
       await emit(rt, run.id, 'tool_blocked', { name, args: call.args });
-      run.messages.push({ role: 'tool', tool_call_id: call.id, content: 'Tool not available.' });
+      run.messages.push(toolResultMessage(call.id, name, 'Tool not available.'));
       continue;
     }
 
     const parsed = def.schema.safeParse(call.args);
     if (!parsed.success) {
       const message = parsed.error.issues.map((issue) => issue.message).join('; ').slice(0, 300);
-      run.messages.push({ role: 'tool', tool_call_id: call.id, content: `Invalid arguments: ${message}` });
+      run.messages.push(toolResultMessage(call.id, name, `Invalid arguments: ${message}`));
       continue;
     }
     const args = parsed.data as Record<string, unknown>;
@@ -191,7 +200,7 @@ export async function handleStep(
 
     if (name === 'update_scratchpad') {
       run.scratchpad = String(args.text).slice(0, 800);
-      run.messages.push({ role: 'tool', tool_call_id: call.id, content: 'Scratchpad updated.' });
+      run.messages.push(toolResultMessage(call.id, name, 'Scratchpad updated.'));
       continue;
     }
 
@@ -214,7 +223,7 @@ export async function handleStep(
     await emit(rt, run.id, 'tool_call', { name, args });
     const text = await executeTool(rt, run, call.id, def, args);
     await emit(rt, run.id, 'tool_result', { name, preview: preview(text) });
-    run.messages.push({ role: 'tool', tool_call_id: call.id, content: text });
+    run.messages.push(toolResultMessage(call.id, name, text));
     if (run.consecutive_errors >= 3) return fail(rt, run, 'tool_errors', now);
   }
 
@@ -257,7 +266,7 @@ async function complete(
   usage: { provider: string; model: string; tokens: number; latencyMs: number },
   now: Date
 ): Promise<StepOutcome> {
-  run.messages.push({ role: 'tool', tool_call_id: toolCallId, content: 'Finished.' });
+  run.messages.push(toolResultMessage(toolCallId, 'finish', 'Finished.'));
   run.result_summary = summary.slice(0, 4000);
   run.pending_request = null;
   run.finished_at = now.toISOString();

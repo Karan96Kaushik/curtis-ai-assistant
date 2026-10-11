@@ -78,6 +78,8 @@ export interface ChatMessage {
   content: string | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  /** Required by Google/Groq when role is tool (function response name). */
+  name?: string;
 }
 
 export interface PendingQuestion {
