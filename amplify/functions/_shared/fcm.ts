@@ -103,8 +103,15 @@ function isStaleTokenError(status: number, errorJson: unknown): boolean {
   return /UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND|Requested entity was not found/i.test(text);
 }
 
-function toNormalized(payload: PushPayloadInput | NormalizedPushPayload): NormalizedPushPayload {
-  if ('extraData' in payload && 'channel' in payload && typeof payload.channel === 'string') {
+function toNormalized(payload: unknown): NormalizedPushPayload {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    'extraData' in payload &&
+    'channel' in payload &&
+    typeof (payload as NormalizedPushPayload).channel === 'string'
+  ) {
     return payload as NormalizedPushPayload;
   }
   try {
@@ -150,10 +157,7 @@ async function sendOne(
  * Send a notification to every FCM token for `userId`.
  * Uses the service-role client (SUPABASE_SECRET_KEY_CURTIS) so RLS does not block the agent.
  */
-export async function sendPushToUser(
-  userId: string,
-  payload: PushPayloadInput | NormalizedPushPayload
-): Promise<PushSendResult> {
+export async function sendPushToUser(userId: string, payload: unknown): Promise<PushSendResult> {
   if (!userId || typeof userId !== 'string') {
     throw new HttpError(400, 'userId is required');
   }
@@ -164,7 +168,7 @@ export async function sendPushToUser(
 export async function sendPushToCaller(
   db: SupabaseClient,
   userId: string,
-  payload: PushPayloadInput | NormalizedPushPayload
+  payload: unknown
 ): Promise<PushSendResult> {
   return sendPushWithClient(db, userId, payload);
 }
@@ -172,7 +176,7 @@ export async function sendPushToCaller(
 async function sendPushWithClient(
   db: SupabaseClient,
   userId: string,
-  payload: PushPayloadInput | NormalizedPushPayload
+  payload: unknown
 ): Promise<PushSendResult> {
   const normalized = toNormalized(payload);
 
