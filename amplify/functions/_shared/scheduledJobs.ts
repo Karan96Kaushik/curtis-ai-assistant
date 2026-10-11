@@ -15,14 +15,15 @@ const MAX_DELAY_MINUTES = 365 * 24 * 60;
 const PAST_SKEW_MS = 60_000;
 const STALE_LOCK_MS = 20 * 60_000;
 const JOB_COLUMNS =
-  'id, user_id, conversation_id, prompt, run_at, cron, timezone, model, status, last_error, locked_at, created_at, updated_at';
+  'id, user_id, conversation_id, profile_id, prompt, run_at, cron, timezone, model, status, last_error, locked_at, created_at, updated_at';
 
 export type ScheduledJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ScheduledJobRecord {
   id: string;
   user_id: string;
-  conversation_id: string;
+  conversation_id: string | null;
+  profile_id: string | null;
   prompt: string;
   run_at: string;
   cron: string | null;
@@ -43,6 +44,7 @@ export interface ScheduledJobView {
   status: ScheduledJobStatus;
   displayAt: string;
   timezone: string;
+  profileId: string | null;
 }
 
 export interface ScheduleRequest {
@@ -117,6 +119,7 @@ function viewOf(row: ScheduledJobRecord): ScheduledJobView {
     status: row.status,
     displayAt: formatUK(row.run_at),
     timezone: row.timezone || TZ,
+    profileId: row.profile_id,
   };
 }
 
@@ -153,6 +156,48 @@ export async function createScheduledJob(
       cron,
       timezone: TZ,
       model,
+      status: 'pending',
+    })
+    .select(JOB_COLUMNS)
+    .single();
+  if (error) throw dbFailure('save the schedule', error);
+  return viewOf(data as ScheduledJobRecord);
+}
+
+/** A later agent run. The clock starts it with this profile; it does not post into a chat. */
+export async function createAgentScheduledJob(
+  db: SupabaseClient,
+  userId: string,
+  profileId: string,
+  input: ScheduleRequest,
+  now = Date.now()
+): Promise<ScheduledJobView> {
+  const prompt = String(input.prompt ?? '').trim();
+  if (!prompt) throw new Error('prompt is required');
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    throw new Error(`prompt is too long (max ${MAX_PROMPT_CHARS} characters)`);
+  }
+  const { runAt, cron } = resolveWhen(input, now);
+  const { data: profile, error: profileError } = await db
+    .from('agent_profiles')
+    .select('id')
+    .eq('id', profileId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (profileError) throw dbFailure('check the profile', profileError);
+  if (!profile) throw new Error('Profile not found');
+
+  const { data, error } = await db
+    .from('scheduled_jobs')
+    .insert({
+      user_id: userId,
+      conversation_id: null,
+      profile_id: profileId,
+      prompt,
+      run_at: runAt,
+      cron,
+      timezone: TZ,
+      model: null,
       status: 'pending',
     })
     .select(JOB_COLUMNS)
@@ -279,6 +324,7 @@ export async function finishJobRun(
     error: string | null;
     pushSent: number;
     pushFailed: number;
+    agentRunId?: string | null;
   }
 ): Promise<void> {
   const { error } = await db
@@ -290,6 +336,7 @@ export async function finishJobRun(
       error: patch.error ? patch.error.slice(0, 2000) : null,
       push_sent: patch.pushSent,
       push_failed: patch.pushFailed,
+      ...(patch.agentRunId ? { agent_run_id: patch.agentRunId } : {}),
     })
     .eq('id', runId);
   if (error) console.error('[scheduler] finish run failed:', error.message);

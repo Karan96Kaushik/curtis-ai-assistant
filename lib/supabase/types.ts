@@ -186,7 +186,8 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          conversation_id: string;
+          conversation_id: string | null;
+          profile_id: string | null;
           prompt: string;
           run_at: string;
           cron: string | null;
@@ -201,7 +202,8 @@ export interface Database {
         Insert: {
           id?: string;
           user_id?: string;
-          conversation_id: string;
+          conversation_id?: string | null;
+          profile_id?: string | null;
           prompt: string;
           run_at: string;
           cron?: string | null;
@@ -231,6 +233,7 @@ export interface Database {
           error: string | null;
           push_sent: number;
           push_failed: number;
+          agent_run_id: string | null;
         };
         Insert: {
           id?: string;
@@ -243,6 +246,7 @@ export interface Database {
           error?: string | null;
           push_sent?: number;
           push_failed?: number;
+          agent_run_id?: string | null;
         };
         Update: never;
         Relationships: [];

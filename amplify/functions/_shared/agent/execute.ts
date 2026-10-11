@@ -1,11 +1,12 @@
 import type { AgentStore } from './store.js';
 import { getTool, presentToolResult, registryToolName } from './registry.js';
 import { sanitizeToolError } from './text.js';
-import type { EmailReader, RunRecord, ToolDef } from './types.js';
+import type { AgentScheduler, EmailReader, RunRecord, ToolDef } from './types.js';
 
 export interface ToolHost {
   store: AgentStore;
   email: EmailReader;
+  schedule: AgentScheduler;
   now: () => Date;
 }
 
@@ -33,7 +34,14 @@ export async function executeTool(
   }
 
   try {
-    const result = await def.handler(args, { userId: run.user_id, runId: run.id, email: rt.email, now: rt.now() });
+    const result = await def.handler(args, {
+      userId: run.user_id,
+      runId: run.id,
+      profileId: run.profile_id,
+      email: rt.email,
+      schedule: rt.schedule,
+      now: rt.now(),
+    });
     const id = typeof args.id === 'string' ? args.id : run.id;
     const text = presentToolResult(def, result.text, id);
     await rt.store.completeToolCall(run.id, toolCallId, 'done', { text });

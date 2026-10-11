@@ -1,6 +1,7 @@
 import type { AgentStore } from './store.js';
 import type {
   ChatMessage,
+  AgentScheduler,
   EmailReader,
   EnqueueMessage,
   ModelTool,
@@ -21,5 +22,6 @@ export interface AgentRuntime {
     text: string
   ) => Promise<void>;
   email: EmailReader;
+  schedule: AgentScheduler;
   now: () => Date;
 }

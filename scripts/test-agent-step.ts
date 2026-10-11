@@ -96,6 +96,13 @@ function scripted(turns: ModelTurn[], tools: ToolDef[] = TOOLS, email?: EmailRea
       notified.push(kind);
     },
     email: email ?? { list: async () => [], get: async () => null },
+    schedule: {
+      schedule: async () => {
+        throw new Error('unused');
+      },
+      list: async () => [],
+      cancel: async () => false,
+    },
     now: () => NOW,
   };
   return {
@@ -264,6 +271,50 @@ describe('agent step loop', () => {
     assert.equal(second, first);
     assert.equal(calls, 1);
   });
+
+  it('schedules a later run on this profile', async () => {
+    const calls: { profileId: string; prompt: string; runInMinutes?: number; now: number }[] = [];
+    const harness = scripted([
+      ok('schedule_task', { run_in_minutes: 15, prompt: 'Summarize new mail.' }),
+      ok('finish', { summary: 'Scheduled.' }),
+    ]);
+    harness.rt.schedule = {
+      schedule: async (input) => {
+        calls.push(input);
+        return {
+          id: 'job-1',
+          prompt: input.prompt,
+          displayAt: '10:15',
+          cron: null,
+          timezone: 'Europe/London',
+          status: 'pending',
+          profileId: input.profileId,
+        };
+      },
+      list: async () => [],
+      cancel: async () => false,
+    };
+    await harness.store.insertRun(
+      run({
+        profile_snapshot: profile({ allowed_tools: ['schedule_task'] }),
+      })
+    );
+    const first = await handleStep({ run_id: 'run-1', expected_step: 0 }, harness.rt);
+    assert.equal(first.outcome, 'continued');
+    assert.deepEqual(calls, [
+      {
+        userId: 'user-1',
+        profileId: 'profile-1',
+        prompt: 'Summarize new mail.',
+        runInMinutes: 15,
+        runAt: undefined,
+        cron: undefined,
+        now: NOW.getTime(),
+      },
+    ]);
+    const saved = await harness.store.loadRun('run-1');
+    assert.match(saved?.messages.at(-1)?.content ?? '', /job-1/);
+  });
 });
 
 describe('profile rules', () => {
@@ -382,6 +433,13 @@ describe('profiles', () => {
       enqueue: async () => undefined,
       notify: async () => undefined,
       email: { list: async () => [], get: async () => null },
+      schedule: {
+        schedule: async () => {
+          throw new Error('unused');
+        },
+        list: async () => [],
+        cancel: async () => false,
+      },
       now: () => NOW,
     };
     const saved = await saveProfile(rt, 'user-1', {

@@ -165,10 +165,36 @@ export interface EmailReader {
   get(userId: string, id: string): Promise<EmailDetail | null>;
 }
 
+export interface ScheduledTaskView {
+  id: string;
+  prompt: string;
+  displayAt: string;
+  cron: string | null;
+  timezone: string;
+  status: string;
+  profileId: string | null;
+}
+
+export interface AgentScheduler {
+  schedule(input: {
+    userId: string;
+    profileId: string;
+    prompt: string;
+    runInMinutes?: number;
+    runAt?: string;
+    cron?: string;
+    now: number;
+  }): Promise<ScheduledTaskView>;
+  list(userId: string): Promise<ScheduledTaskView[]>;
+  cancel(userId: string, jobId: string): Promise<boolean>;
+}
+
 export interface ToolCtx {
   userId: string;
   runId: string;
+  profileId: string;
   email: EmailReader;
+  schedule: AgentScheduler | null;
   now: Date;
 }
 

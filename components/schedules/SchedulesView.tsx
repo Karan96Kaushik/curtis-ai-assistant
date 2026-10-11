@@ -52,9 +52,13 @@ function JobCard({
       <CardContent className="flex flex-col gap-3">
         {job.last_error && <p className="text-sm text-destructive">{job.last_error}</p>}
         <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/c/${job.conversation_id}`}>Open chat</Link>
-          </Button>
+          {job.conversation_id ? (
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/c/${job.conversation_id}`}>Open chat</Link>
+            </Button>
+          ) : (
+            <Badge variant="outline">Agent</Badge>
+          )}
           {job.status === 'pending' && (
             <Button variant="ghost" size="sm" disabled={cancelling} onClick={() => onCancel(job.id)}>
               {cancelling ? <Loader2 className="animate-spin" /> : null}
@@ -75,6 +79,11 @@ function JobCard({
                     <span className="ml-2 font-normal text-muted-foreground">{formatUkTime(run.started_at)}</span>
                   </p>
                   {run.error && <p className="mt-1 text-destructive">{run.error}</p>}
+                  {run.agent_run_id && (
+                    <Button asChild variant="link" size="sm" className="mt-1 h-auto px-0">
+                      <Link to={`/agents/runs/${run.agent_run_id}`}>Open agent run</Link>
+                    </Button>
+                  )}
                   {run.reply && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-muted-foreground">{run.reply}</p>}
                   <p className="mt-1 text-xs text-muted-foreground">
                     Push sent {run.push_sent}

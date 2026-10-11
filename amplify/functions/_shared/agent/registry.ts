@@ -28,6 +28,22 @@ const pushSend = z.object({
   body: z.string().min(1).max(500),
 });
 
+const scheduleTask = z.object({
+  run_in_minutes: z.number().min(0).max(365 * 24 * 60).optional(),
+  run_at: z.string().min(1).max(40).optional(),
+  cron: z.string().min(1).max(120).optional(),
+  prompt: z.string().min(1).max(4000),
+});
+
+const cancelSchedule = z.object({
+  job_id: z.string().min(1).max(80),
+});
+
+function scheduleFailure(err: unknown): { text: string } {
+  const message = err instanceof Error ? err.message : String(err);
+  return { text: message.slice(0, 300) };
+}
+
 const unavailableArgs = z.object({
   input: z.string().max(500).optional(),
 });
@@ -116,6 +132,80 @@ export const TOOLS: ToolDef[] = [
       const parsed = pushSend.parse(args);
       const result = await sendPushToUser(ctx.userId, { title: parsed.title, body: parsed.body });
       return { text: result.sent ? `Push sent to ${result.sent} device(s).` : 'No devices are registered for push.' };
+    },
+  },
+  {
+    name: 'schedule_task',
+    integration: 'scheduler',
+    access: 'write',
+    risk: 'medium',
+    description:
+      'Schedule work for later. When it is due, a new agent run starts with this profile and the prompt. Use exactly one of run_in_minutes, run_at (UK local time), or cron.',
+    schema: scheduleTask,
+    maxResultChars: 800,
+    handler: async (args, ctx) => {
+      if (!ctx.schedule) return { text: 'Scheduling is not available.' };
+      const parsed = scheduleTask.parse(args);
+      try {
+        const job = await ctx.schedule.schedule({
+          userId: ctx.userId,
+          profileId: ctx.profileId,
+          prompt: parsed.prompt,
+          runInMinutes: parsed.run_in_minutes,
+          runAt: parsed.run_at,
+          cron: parsed.cron,
+          now: ctx.now.getTime(),
+        });
+        const when = job.cron ? `Recurring (${job.cron}). Next run ${job.displayAt}.` : `Scheduled for ${job.displayAt}.`;
+        return { text: `${when} Job ${job.id}. A new agent run will start then. Prompt: ${job.prompt}` };
+      } catch (err) {
+        return scheduleFailure(err);
+      }
+    },
+  },
+  {
+    name: 'list_schedules',
+    integration: 'scheduler',
+    access: 'read',
+    risk: 'low',
+    description: 'List this user\'s pending and running schedules, including chat schedules and agent schedules.',
+    schema: z.object({}),
+    maxResultChars: 2500,
+    handler: async (_args, ctx) => {
+      if (!ctx.schedule) return { text: 'Scheduling is not available.' };
+      try {
+        const jobs = await ctx.schedule.list(ctx.userId);
+        if (!jobs.length) return { text: 'No pending schedules.' };
+        const text = jobs
+          .map((job) => {
+            const kind = job.profileId ? 'Agent' : 'Chat';
+            const when = job.cron ? `recurring ${job.cron}` : 'one-off';
+            return `${job.id} | ${kind} | ${when} | ${job.status} | ${job.displayAt} | ${job.prompt}`;
+          })
+          .join('\n');
+        return { text };
+      } catch (err) {
+        return scheduleFailure(err);
+      }
+    },
+  },
+  {
+    name: 'cancel_schedule',
+    integration: 'scheduler',
+    access: 'write',
+    risk: 'medium',
+    description: 'Cancel a pending schedule by id. A job that is already running cannot be cancelled.',
+    schema: cancelSchedule,
+    maxResultChars: 300,
+    handler: async (args, ctx) => {
+      if (!ctx.schedule) return { text: 'Scheduling is not available.' };
+      const parsed = cancelSchedule.parse(args);
+      try {
+        const cancelled = await ctx.schedule.cancel(ctx.userId, parsed.job_id);
+        return { text: cancelled ? `Cancelled schedule ${parsed.job_id}.` : `Schedule ${parsed.job_id} was not pending.` };
+      } catch (err) {
+        return scheduleFailure(err);
+      }
     },
   },
 ];

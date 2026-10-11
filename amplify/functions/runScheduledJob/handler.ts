@@ -12,6 +12,8 @@ import {
   settleJob,
   type ScheduledJobRecord,
 } from '../_shared/scheduledJobs.js';
+import { createRun } from '../_shared/agent/runs.js';
+import { productionRuntime } from '../_shared/agent/runtime.js';
 import { supabaseAsService } from '../_shared/supabaseUser.js';
 import { executeConversationPrompt, loadOwnedConversation } from '../chat/conversationTurn.js';
 
@@ -87,10 +89,50 @@ async function runClaimed(job: ScheduledJobRecord, lockedAt: string): Promise<vo
     return;
   }
 
+  if (job.profile_id) {
+    try {
+      const run = await createRun(productionRuntime(), job.user_id, job.prompt, job.profile_id, 'schedule');
+      await finishJobRun(db, runId, {
+        status: 'succeeded',
+        reply: `Started agent run ${run.id}`,
+        error: null,
+        pushSent: 0,
+        pushFailed: 0,
+        agentRunId: run.id,
+      });
+      await settleJob(db, job, lockedAt, 'ok', null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[scheduler] agent job ${job.id} failed:`, message);
+      await finishJobRun(db, runId, {
+        status: 'failed',
+        reply: null,
+        error: message,
+        pushSent: 0,
+        pushFailed: 0,
+      });
+      await settleJob(db, job, lockedAt, 'fail', message);
+    }
+    return;
+  }
+
+  const conversationId = job.conversation_id;
+  if (!conversationId) {
+    await finishJobRun(db, runId, {
+      status: 'failed',
+      reply: null,
+      error: 'Schedule has no conversation',
+      pushSent: 0,
+      pushFailed: 0,
+    });
+    await settleJob(db, job, lockedAt, 'drop', 'Schedule has no conversation');
+    return;
+  }
+
   const switches: { from: string; to: string }[] = [];
   const model = resolveAgentModel(job.model, process.env.GROQ_MODEL);
   try {
-    const conversation = await loadOwnedConversation(db, job.conversation_id, job.user_id);
+    const conversation = await loadOwnedConversation(db, conversationId, job.user_id);
     const result = await runWithTurn({ model, signal: new AbortController().signal, switches }, () =>
       executeConversationPrompt({
         db,
@@ -112,7 +154,7 @@ async function runClaimed(job: ScheduledJobRecord, lockedAt: string): Promise<vo
       const push = await sendPushToUser(job.user_id, {
         title: failed ? 'Scheduled task failed' : 'Scheduled task',
         body: notificationBody(replyText, failed ? 'The scheduled task failed.' : 'The scheduled task finished.'),
-        data: { conversationId: job.conversation_id, jobId: job.id },
+        data: { conversationId, jobId: job.id },
       });
       pushSent = push.sent;
       pushFailed = push.failed;

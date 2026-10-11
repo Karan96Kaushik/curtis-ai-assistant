@@ -34,7 +34,8 @@ stepFn.addEventSource(
 );
 agentQueue.grantSendMessages(stepFn);
 agentQueue.grantSendMessages(backend.agentApi.resources.lambda);
-for (const fn of [stepFn, backend.agentApi.resources.lambda]) {
+agentQueue.grantSendMessages(backend.runScheduledJob.resources.lambda);
+for (const fn of [stepFn, backend.agentApi.resources.lambda, backend.runScheduledJob.resources.lambda]) {
   (fn as IFunction & { addEnvironment(key: string, value: string): void }).addEnvironment(
     'AGENT_STEP_QUEUE_URL',
     agentQueue.queueUrl

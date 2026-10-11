@@ -125,7 +125,7 @@ create policy device_tokens_owner on public.device_tokens
 create table public.scheduled_jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  conversation_id uuid not null references public.conversations (id) on delete cascade,
+  conversation_id uuid references public.conversations (id) on delete cascade,
   prompt text not null check (char_length(prompt) between 1 and 4000),
   run_at timestamptz not null,
   cron text check (cron is null or char_length(cron) between 1 and 120),
@@ -374,4 +374,20 @@ $$;
 
 revoke all on function public.increment_token_ledger(date, text, text, bigint) from public;
 grant execute on function public.increment_token_ledger(date, text, text, bigint) to service_role;
+
+-- Agent schedules have a profile and no conversation. Chat schedules stay the other way around.
+alter table public.scheduled_jobs
+  alter column conversation_id drop not null;
+
+alter table public.scheduled_jobs
+  add column profile_id uuid references public.agent_profiles (id) on delete cascade;
+
+alter table public.scheduled_jobs
+  add constraint scheduled_jobs_target_chk check (
+    (conversation_id is not null and profile_id is null)
+    or (conversation_id is null and profile_id is not null)
+  );
+
+alter table public.scheduled_job_runs
+  add column agent_run_id uuid references public.agent_runs (id) on delete set null;
 
