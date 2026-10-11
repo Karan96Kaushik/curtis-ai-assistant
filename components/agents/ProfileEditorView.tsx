@@ -33,7 +33,7 @@ import { getAgentProfile, listAgentRunsForProfile } from '@/lib/supabase/agentRu
 import type { AgentRunRow } from '@/lib/supabase/types';
 
 const DEFAULT_PROMPT =
-  'Work toward the user\'s goal. Notifications are truncated previews, not full messages — say so when it matters. Call notification_app_stats before search_notifications so you know which apps are active. Use tools for facts. Ask when something is ambiguous. Finish with a short summary.';
+  'Work toward the user\'s goal. Use only the tools available to you. Use tools for facts. Ask when something is ambiguous. Finish with a short summary.';
 
 function rules() {
   return {

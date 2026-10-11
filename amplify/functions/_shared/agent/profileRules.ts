@@ -35,9 +35,6 @@ export function normalizeAllowedTools(tools: readonly string[]): string[] {
       out.push(tool);
     }
   }
-  if (seen.has('search_notifications') && !seen.has('notification_app_stats')) {
-    out.unshift('notification_app_stats');
-  }
   return out;
 }
 

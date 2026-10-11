@@ -276,7 +276,7 @@ export const TOOLS: ToolDef[] = [
     access: 'read',
     risk: 'low',
     description:
-      'Per-app notification counts for a time window (hours, or since/until). Default last 24 hours. Call this before search_notifications to see which apps are active.',
+      'Per-app notification counts for a time window (hours, or since/until). Default last 24 hours. Use before search_notifications to see which apps are active.',
     schema: notificationAppStats,
     maxResultChars: 2500,
     handler: async (args, ctx) => {
@@ -291,7 +291,7 @@ export const TOOLS: ToolDef[] = [
     access: 'read',
     risk: 'low',
     description:
-      'Search phone notification previews. Call notification_app_stats first unless you already have counts for this window. Filter by app, exclude_app, sender, text, category, since/until or hours (1–168). Default window is 7 days, default limit 20, max 40. Not full messages.',
+      'Search phone notification previews. Filter by app, exclude_app, sender, text, category, since/until or hours (1–168). If notification_app_stats is available, call it first for the time window. Default window is 7 days, default limit 20, max 40. Not full messages.',
     schema: searchNotifications,
     maxResultChars: 6000,
     handler: async (args, ctx) => {

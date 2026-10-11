@@ -1,5 +1,5 @@
 import { chainFromModelIds } from '../../../../lib/agents/modelChain.js';
-import { CORE_RULES } from './context.js';
+import { coreRulesForTools } from './context.js';
 import type { AgentRuntime } from './deps.js';
 import { redactSensitive } from './notificationStore.js';
 import { defaultModelChain } from './profileRules.js';
@@ -147,13 +147,13 @@ export function parseAnalysisSuggestion(text: string): ProfileSuggestion {
   };
 }
 
-function analysisSystemPrompt(): string {
+function analysisSystemPrompt(allowedTools: readonly string[]): string {
   return [
     'You improve an agent profile\'s Instructions (system_prompt) from ONE finished run.',
     'Return JSON only with keys rationale, suggested_system_prompt, and change_bullets.',
     `suggested_system_prompt must be 1–${SUGGESTED_PROMPT_MAX} characters.`,
     'Do not contradict these core rules:',
-    CORE_RULES,
+    coreRulesForTools(allowedTools),
     'Improve future behaviour for similar goals using only this run.',
     'Keep useful existing instructions. Do not invent tools, permissions, or facts that are not in the pack.',
     'Do not include notification bodies, secrets, or untrusted_data in the suggestion.',
@@ -171,14 +171,14 @@ export function clampToMaxWords(text: string, maxWords: number): string {
   return words.slice(0, Math.max(1, maxWords)).join(' ');
 }
 
-function improveSystemPrompt(maxWords: number): string {
+function improveSystemPrompt(maxWords: number, allowedTools: readonly string[]): string {
   return [
     'Rewrite the agent Instructions to be clearer and more actionable.',
     'Return the improved Instructions only — no JSON, no markdown fences, no commentary.',
     `At most ${maxWords} words (at most double the original). Prefer fewer words when possible.`,
     'Keep the intent. Do not invent tools, permissions, or facts.',
     'Do not contradict these core rules:',
-    CORE_RULES,
+    coreRulesForTools(allowedTools),
   ].join(' ');
 }
 
@@ -230,10 +230,11 @@ export async function improvePrompt(
     if (!live) throw new AgentInputError('Profile not found', 404);
   }
 
+  const improveProfile = profileForImprove(live, input.model_ids);
   const out = await rt.callModel(
-    profileForImprove(live, input.model_ids),
+    improveProfile,
     [
-      { role: 'system', content: improveSystemPrompt(maxWords) },
+      { role: 'system', content: improveSystemPrompt(maxWords, improveProfile.allowed_tools) },
       { role: 'user', content: source },
     ],
     []
@@ -273,7 +274,7 @@ export async function analyzeProfileRun(
   const out = await rt.callModel(
     profile,
     [
-      { role: 'system', content: analysisSystemPrompt() },
+      { role: 'system', content: analysisSystemPrompt(profile.allowed_tools) },
       { role: 'user', content: JSON.stringify(pack) },
     ],
     []

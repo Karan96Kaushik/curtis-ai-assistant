@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { z } from 'zod';
 import { apiModelId, chainFromModelIds } from '../lib/agents/modelChain.js';
 import { INBOX_TOOLS, PERMISSION_TOOLS } from '../lib/agents/toolCatalog.js';
-import { buildContext, CORE_RULES, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
+import { buildContext, CORE_RULES, coreRulesForTools, summaryUpdate } from '../amplify/functions/_shared/agent/context.js';
 import type { AgentRuntime } from '../amplify/functions/_shared/agent/deps.js';
 import { executeTool } from '../amplify/functions/_shared/agent/execute.js';
 import { eventsOf, MemoryAgentStore } from '../amplify/functions/_shared/agent/memoryStore.js';
@@ -569,6 +569,22 @@ describe('notification store helpers', () => {
       toModelTools(toolsForProfile(profile())).some((tool) => tool.function.name === 'notification_app_stats'),
       true
     );
+    const noNotif = coreRulesForTools([]);
+    assert.equal(/notification_app_stats/.test(noNotif), false);
+    assert.equal(/search_notifications/.test(noNotif), false);
+    const searchOnly = coreRulesForTools(['search_notifications']);
+    assert.equal(/notification_app_stats/.test(searchOnly), false);
+    assert.match(searchOnly, /searching notifications/i);
+    const noToolsProfile = profile({
+      allowed_tools: [],
+      system_prompt: 'Check latest PRs from GitHub.',
+    });
+    assert.equal(
+      toModelTools(toolsForProfile(noToolsProfile)).some((tool) => tool.function.name === 'notification_app_stats'),
+      false
+    );
+    const prompt = buildContext(run({ profile_snapshot: noToolsProfile }));
+    assert.equal(/notification_app_stats/.test(prompt[0]?.content ?? ''), false);
   });
 });
 
@@ -803,6 +819,14 @@ describe('user-facing step feedback', () => {
 
   it('continues a finished run with additional instructions', async () => {
     const harness = scripted([]);
+    await harness.store.insertProfile({
+      ...profile(),
+      user_id: 'user-1',
+      is_system: false,
+      is_default: false,
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    });
     await harness.store.insertRun(
       run({
         status: 'done',
