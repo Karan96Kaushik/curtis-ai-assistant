@@ -11,7 +11,7 @@ const TOOL_NAME = 'request_phone_notifications';
 /** Shortest window the model may request. */
 const MIN_DURATION_MINUTES = 1;
 /** Longest window. 24 hours of device notifications. */
-const MAX_DURATION_MINUTES = 24 * 60;
+const MAX_DURATION_MINUTES = 999 * 24 * 60;
 const MAX_ITEMS = 100;
 const MAX_TITLE_CHARS = 180;
 const MAX_BODY_CHARS = 600;
