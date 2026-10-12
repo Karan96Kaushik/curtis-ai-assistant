@@ -122,13 +122,8 @@ export async function handleStep(
   const profile = run.profile_snapshot;
 
   if (run.next_attempt_at && now.getTime() < Date.parse(run.next_attempt_at)) {
+    // FIFO cannot delay messages; scheduleTick wakeWaitingRuns re-enqueues when due.
     const delaySeconds = Math.min(900, Math.max(1, Math.ceil((Date.parse(run.next_attempt_at) - now.getTime()) / 1000)));
-    await rt.enqueue({
-      run_id: run.id,
-      expected_step: run.step_count,
-      delaySeconds,
-      dedupNonce: `wait:${run.next_attempt_at}`,
-    });
     return { outcome: 'requeued', delaySeconds };
   }
 
@@ -169,12 +164,7 @@ export async function handleStep(
     const saved = await rt.store.save(run);
     if (!saved) return { outcome: 'lost_race' };
     await emit(rt, run.id, 'rate_limited', { delaySeconds: out.delaySeconds });
-    await rt.enqueue({
-      run_id: run.id,
-      expected_step: run.step_count,
-      delaySeconds: out.delaySeconds,
-      dedupNonce: `wait:${run.next_attempt_at}`,
-    });
+    // Do not enqueue with DelaySeconds — FIFO rejects it. scheduleTick wakes due waits.
     logStep(run, { outcome: 'requeued', delay_seconds: out.delaySeconds });
     return { outcome: 'requeued', delaySeconds: out.delaySeconds };
   }

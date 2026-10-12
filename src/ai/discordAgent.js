@@ -263,7 +263,7 @@ function coerceArgs(name, args) {
 
 /**
  * @param {object} discordCtx
- * @param {{ intent: object, plan: object }} turn
+ * @param {{ intent: object, plan: object, tools?: object[] }} turn
  */
 function buildSystemPrompt(discordCtx, turn) {
   const when = nowForPrompt();
@@ -272,7 +272,7 @@ function buildSystemPrompt(discordCtx, turn) {
   const contextIndex = storedContexts.forPrompt();
   const confirmOn = requireConfirmation();
   const pending = pendingActions.get(discordCtx.channelId, discordCtx.userId);
-  const modePack = packsForIntent(turn.intent, { confirmOn });
+  const modePack = packsForIntent(turn.intent, { confirmOn, tools: turn.tools });
 
   let confirmationBlock;
   if (!confirmOn) {
@@ -579,7 +579,7 @@ async function handleUserMessage(input) {
 
     const history = historyForIntent;
     const messages = [
-      { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan, workspace }) },
+      { role: 'system', content: buildSystemPrompt(turnCtx, { intent, plan, workspace, tools }) },
       ...history,
     ];
 

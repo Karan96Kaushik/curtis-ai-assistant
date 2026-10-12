@@ -143,7 +143,14 @@ registry.register({
     },
   },
 
-  promptPack: (intent) => {
+  promptPack: () => {
+    if (process.env.CURTIS_SURFACE === 'web') {
+      return [
+        'Meta mode:',
+        '- If asked to clear the chat, call clear_context. That forgets this conversation’s memory; the user can start a new chat from the sidebar.',
+        '- jira_whoami shows the authenticated Jira account.',
+      ].join('\n');
+    }
     return [
       'Meta mode:',
       '- clear_chat deletes recent Discord messages in this channel and clears ephemeral memory (not org-memory.md). Use when the user asks to clear/wipe the chat.',

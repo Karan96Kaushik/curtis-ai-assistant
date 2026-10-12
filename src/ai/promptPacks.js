@@ -10,9 +10,7 @@ const SURFACES = {
   },
   web: {
     persona:
-      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, light web research, the user\'s phone notifications, outbound Android push alerts, and scheduled tasks at Flexible Power Systems. Browser and Microsoft Teams are not available in the web app. You can schedule a task for later with schedule_task (a delay, a UK clock time, or a cron). When it runs, you do the work, the reply is posted in that chat, and a short version is pushed to the phone. Phone notifications are private (email, promotions, one-time codes, and messages). Call request_phone_notifications with a duration_minutes from 1 to 1440. It reads that window immediately for the signed-in user. Never claim you saw a notification that the tool did not return. Do not store notification text in memory. To alert the user\'s phone, call send_push_notification immediately (no confirmation) with a title and body; prefer notification_key, channel/urgency, deep_link, and actions when useful.',
-    clearChat:
-      'If asked to clear the chat, call clear_context (that forgets this conversation’s memory; the user can start a new chat from the sidebar).',
+      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, light web research, the user\'s phone notifications, outbound Android push alerts, and scheduled tasks at Flexible Power Systems. Browser and Microsoft Teams are not available in the web app.',
   },
 };
 
@@ -24,7 +22,62 @@ function identityPack() {
     'Prefer action over clarifying questions unless a required field is missing.',
     'Sound natural — avoid stock closers like "What would you like to do next?".',
     surface.clearChat,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Names from a toolsForIntent result, or from a list of tool name strings. */
+function loadedToolNames(tools) {
+  const names = new Set();
+  if (!Array.isArray(tools)) return names;
+  for (const tool of tools) {
+    const name = typeof tool === 'string' ? tool : tool?.function?.name;
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+function domainsAlreadyPacked(intent) {
+  if (intent?.domain === 'mixed') return new Set(registry.promptPacks.keys());
+  return new Set(intent?.domain ? [intent.domain] : []);
+}
+
+/**
+ * Usage notes for tools actually offered this turn. The persona stays free of tool names.
+ * @param {Set<string>} names
+ * @param {object} intent
+ * @param {object} opts
+ */
+function loadedToolPack(names, intent, opts) {
+  if (!names.size || process.env.CURTIS_SURFACE !== 'web') return null;
+  const covered = domainsAlreadyPacked(intent);
+  const parts = [];
+
+  if (names.has('request_phone_notifications') && !covered.has('phone')) {
+    const pack = registry.getPromptPack('phone', intent, opts);
+    if (pack) parts.push(pack);
+  }
+  if (names.has('send_push_notification') && !covered.has('push')) {
+    const pack = registry.getPromptPack('push', intent, opts);
+    if (pack) parts.push(pack);
+  }
+  if (names.has('schedule_task') && !covered.has('scheduler')) {
+    parts.push(
+      [
+        'Scheduled tasks:',
+        '- schedule_task accepts a delay (run_in_minutes), a UK clock time (run_at), or a cron.',
+        '- When it runs, you do the work, the reply is posted in that chat, and a short version is pushed to the phone.',
+      ].join('\n')
+    );
+  }
+  if ((names.has('clear_context') || names.has('clear_chat')) && !covered.has('meta')) {
+    parts.push(
+      'If asked to clear the chat, call clear_context (that forgets this conversation’s memory; the user can start a new chat from the sidebar).'
+    );
+  }
+
+  return parts.length ? parts.join('\n\n') : null;
 }
 
 function fluidPack() {
@@ -72,11 +125,8 @@ function packsForIntent(intent, opts = {}) {
     }
   }
 
-  // Push is always available on web; surface its rules even when the domain is jira/github/etc.
-  if (process.env.CURTIS_SURFACE === 'web' && intent.domain !== 'push' && intent.domain !== 'mixed') {
-    const pushPack = registry.getPromptPack('push', intent, opts);
-    if (pushPack) packs.push(pushPack);
-  }
+  const toolPack = loadedToolPack(loadedToolNames(opts.tools), intent, opts);
+  if (toolPack) packs.push(toolPack);
 
   return packs.join('\n\n');
 }

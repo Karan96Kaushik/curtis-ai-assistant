@@ -30,7 +30,7 @@ import {
 import { providerErrorDetail, toProviderMessages } from '../amplify/functions/_shared/agent/provider.js';
 import { knownToolNames, modelToolName, toModelTools, TOOLS, toolsForProfile } from '../amplify/functions/_shared/agent/registry.js';
 import { answerRun, continueRun, createRun, decideApproval, saveProfile } from '../amplify/functions/_shared/agent/runs.js';
-import { recoverStaleRuns } from '../amplify/functions/_shared/agent/stall.js';
+import { recoverStaleRuns, wakeWaitingRuns } from '../amplify/functions/_shared/agent/stall.js';
 import { failActiveRun, finalizeResultSummary, handleStep, stepFeedback } from '../amplify/functions/_shared/agent/step.js';
 import { capText, wrapUntrusted } from '../amplify/functions/_shared/agent/text.js';
 import type { EmailReader, EnqueueMessage, ModelTurn, ProfileSnapshot, RunRecord, ToolDef } from '../amplify/functions/_shared/agent/types.js';
@@ -310,13 +310,15 @@ describe('agent step loop', () => {
   it('requeues a rate limit without consuming the step', async () => {
     const harness = scripted([{ kind: 'rate_limited', delaySeconds: 45, fallbacks: [] }]);
     await harness.store.insertRun(run());
+    const beforeEnqueue = harness.enqueued.length;
     const result = await handleStep({ run_id: 'run-1', expected_step: 0 }, harness.rt);
     assert.equal(result.outcome, 'requeued');
     const saved = await harness.store.loadRun('run-1');
     assert.equal(saved?.status, 'running');
     assert.equal(saved?.step_count, 0);
     assert.ok(saved?.next_attempt_at);
-    assert.equal(harness.enqueued.at(-1)?.delaySeconds, 45);
+    // FIFO cannot DelaySeconds — wait for scheduleTick wakeWaitingRuns.
+    assert.equal(harness.enqueued.length, beforeEnqueue);
 
     const again = await handleStep({ run_id: 'run-1', expected_step: 0 }, harness.rt);
     assert.equal(again.outcome, 'requeued');
@@ -915,6 +917,29 @@ describe('stale running recovery', () => {
     const over = await recoverStaleRuns(harness.rt, NOW);
     assert.equal(over.failed, 1);
     assert.equal((await harness.store.loadRun('run-2'))?.status, 'failed');
+  });
+
+  it('wakes runs whose next_attempt_at is due', async () => {
+    const harness = scripted([]);
+    await harness.store.insertRun(
+      run({
+        status: 'running',
+        step_count: 1,
+        next_attempt_at: new Date(NOW.getTime() - 1000).toISOString(),
+      })
+    );
+    await harness.store.insertRun(
+      run({
+        id: 'run-wait',
+        status: 'running',
+        step_count: 2,
+        next_attempt_at: new Date(NOW.getTime() + 60_000).toISOString(),
+      })
+    );
+    const woken = await wakeWaitingRuns(harness.rt, NOW);
+    assert.equal(woken, 1);
+    assert.equal(harness.enqueued.at(-1)?.run_id, 'run-1');
+    assert.match(harness.enqueued.at(-1)?.dedupNonce ?? '', /^wait:/);
   });
 
   it('marks a running run failed after an unexpected step error', async () => {

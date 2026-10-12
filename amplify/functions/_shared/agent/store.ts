@@ -185,6 +185,8 @@ export interface AgentStore {
   updateProfile(profile: ProfileRecord): Promise<boolean>;
   loadProfile(id: string, userId: string): Promise<ProfileRecord | null>;
   listStaleRuns(olderThanIso: string, limit?: number): Promise<RunRecord[]>;
+  /** Active runs whose next_attempt_at is due (rate-limit / backoff waits). */
+  listWaitingDue(nowIso: string, limit?: number): Promise<RunRecord[]>;
 }
 
 export class SupabaseAgentStore implements AgentStore {
@@ -401,6 +403,22 @@ export class SupabaseAgentStore implements AgentStore {
       .in('status', ['queued', 'running'])
       .lt('updated_at', olderThanIso)
       .order('updated_at', { ascending: true })
+      .limit(Math.min(50, Math.max(1, limit)));
+    if (error) throw new Error(error.message);
+    return (data ?? []).flatMap((row) => {
+      const parsed = runFromRow(row as Row);
+      return parsed ? [parsed] : [];
+    });
+  }
+
+  async listWaitingDue(nowIso: string, limit = 20): Promise<RunRecord[]> {
+    const { data, error } = await this.db
+      .from('agent_runs')
+      .select('*')
+      .in('status', ['queued', 'running'])
+      .not('next_attempt_at', 'is', null)
+      .lte('next_attempt_at', nowIso)
+      .order('next_attempt_at', { ascending: true })
       .limit(Math.min(50, Math.max(1, limit)));
     if (error) throw new Error(error.message);
     return (data ?? []).flatMap((row) => {

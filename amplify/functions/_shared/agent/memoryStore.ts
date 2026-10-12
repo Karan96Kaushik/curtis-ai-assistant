@@ -133,6 +133,20 @@ export class MemoryAgentStore implements AgentStore {
         .slice(0, Math.min(50, Math.max(1, limit)))
     );
   }
+
+  async listWaitingDue(nowIso: string, limit = 20): Promise<RunRecord[]> {
+    return clone(
+      [...this.runs.values()]
+        .filter(
+          (run) =>
+            (run.status === 'queued' || run.status === 'running') &&
+            run.next_attempt_at != null &&
+            run.next_attempt_at <= nowIso
+        )
+        .sort((a, b) => (a.next_attempt_at ?? '').localeCompare(b.next_attempt_at ?? ''))
+        .slice(0, Math.min(50, Math.max(1, limit)))
+    );
+  }
 }
 
 export function eventsOf(store: MemoryAgentStore, runId: string, type?: EventType): AgentEvent[] {
