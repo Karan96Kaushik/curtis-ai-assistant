@@ -54,7 +54,16 @@ function loadedToolPack(names, intent, opts) {
   const covered = domainsAlreadyPacked(intent);
   const parts = [];
 
-  if (names.has('request_phone_notifications') && !covered.has('phone')) {
+  const phoneTools = [
+    'notification_app_stats',
+    'search_notifications',
+    'notification_digest',
+    'get_notification',
+    'list_notification_apps',
+    'get_more',
+    'draft_reply',
+  ];
+  if (phoneTools.some((name) => names.has(name)) && !covered.has('phone')) {
     const pack = registry.getPromptPack('phone', intent, opts);
     if (pack) parts.push(pack);
   }

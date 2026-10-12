@@ -8,7 +8,15 @@ import registry from '../../../src/core/moduleRegistry.js';
 import phoneNotifications from '../../../src/ai/phoneNotifications.js';
 import pushNotificationsModule from '../../../src/ai/pushNotifications.js';
 import { sendPushToUser } from '../_shared/fcm.js';
+import {
+  formatSearchResult,
+  replyLinkFromNotification,
+  supabaseNotificationStore,
+  type SearchQuery,
+} from '../_shared/agent/notificationStore.js';
 import { readPhoneNotifications } from '../_shared/readPhoneNotifications.js';
+import { supabaseAsService } from '../_shared/supabaseUser.js';
+import phoneModule from '../../../src/modules/phoneNotifications.js';
 import { HttpError } from '../_shared/http.js';
 import { cancelScheduledJob, createScheduledJob, listScheduledJobs } from '../_shared/scheduledJobs.js';
 import webSchedulerModule from '../../../src/modules/webScheduler.js';
@@ -66,6 +74,79 @@ const phoneReader = phoneNotifications as unknown as {
   ): void;
 };
 phoneReader.configure((userId, durationMinutes) => readPhoneNotifications(userId, durationMinutes));
+
+const phoneTools = phoneModule as unknown as {
+  configure(fn: (name: string, userId: string, args: Record<string, unknown>) => Promise<string>): void;
+};
+
+function queryArg(args: Record<string, unknown>): SearchQuery {
+  const str = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : undefined);
+  const num = (key: string) => (typeof args[key] === 'number' ? (args[key] as number) : undefined);
+  return {
+    app: str('app'),
+    exclude_app: str('exclude_app'),
+    sender: str('sender'),
+    text: str('text'),
+    category: str('category'),
+    since: str('since'),
+    until: str('until'),
+    hours: num('hours'),
+    limit: num('limit'),
+    offset: num('offset'),
+  };
+}
+
+phoneTools.configure(async (name, userId, args) => {
+  const store = supabaseNotificationStore(supabaseAsService());
+  const now = new Date();
+  const allowed: string[] = [];
+  if (name === 'notification_app_stats') {
+    return (await store.appStats(userId, allowed, queryArg(args), now)).text;
+  }
+  if (name === 'search_notifications' || name === 'get_more') {
+    const result = await store.search(userId, allowed, queryArg(args), now);
+    return formatSearchResult(result.items, result.coverage, result.nextOffset);
+  }
+  if (name === 'notification_digest') {
+    const since = typeof args.since === 'string' ? args.since : '';
+    if (!since.trim()) throw new Error('notification_digest requires since (an ISO time).');
+    const groupBy = args.group_by === 'sender' ? 'sender' : 'app';
+    return (await store.digest(userId, allowed, since, groupBy, now)).text;
+  }
+  if (name === 'get_notification') {
+    const id = typeof args.id === 'string' ? args.id : '';
+    if (!id.trim()) throw new Error('get_notification requires id.');
+    const result = await store.get(userId, allowed, id, now);
+    if (!result.item) return `${result.coverage.text}\nNotification not found.`;
+    return `${result.coverage.text}\nPreview (not a full message):\n${result.item.app} | ${result.item.sender}\n${result.body}`;
+  }
+  if (name === 'list_notification_apps') {
+    const result = await store.listApps(userId, allowed, now);
+    const apps = result.apps.length ? result.apps.join('\n') : 'No apps in range.';
+    return `${result.coverage.text}\n${apps}`;
+  }
+  if (name === 'draft_reply') {
+    const notificationId = typeof args.notification_id === 'string' ? args.notification_id : '';
+    const body = typeof args.body === 'string' ? args.body : '';
+    if (!notificationId.trim() || !body.trim()) throw new Error('draft_reply requires notification_id and body.');
+    const row = await store.loadForDraft(userId, allowed, notificationId);
+    if (!row) throw new Error('Notification not found.');
+    const link = replyLinkFromNotification(row, body);
+    if (!link) throw new Error('Could not build a reply link from that notification.');
+    const preview = body.replace(/\s+/g, ' ').trim().slice(0, 140);
+    try {
+      await sendPushToUser(userId, {
+        title: 'Draft reply ready',
+        body: preview,
+        data: { link: link.link, notification_id: String(row.id), reply_channel: link.channel },
+      });
+    } catch {
+      // The draft link is still returned in the tool result.
+    }
+    return `Draft stored for ${link.channel}. Open: ${link.link}\nYou send this yourself; the agent cannot send messages.`;
+  }
+  throw new Error(`Unknown phone tool ${name}`);
+});
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge

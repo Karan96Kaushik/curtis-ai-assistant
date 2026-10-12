@@ -178,7 +178,18 @@ function domainFromTool(tool) {
   if (name.startsWith('teams_')) return 'teams';
   if (name.startsWith('browser_')) return 'browser';
   if (name.startsWith('wf_release_')) return 'release';
-  if (name === 'request_phone_notifications') return 'phone';
+  if (
+    name === 'request_phone_notifications' ||
+    name === 'notification_app_stats' ||
+    name === 'search_notifications' ||
+    name === 'notification_digest' ||
+    name === 'get_notification' ||
+    name === 'list_notification_apps' ||
+    name === 'get_more' ||
+    name === 'draft_reply'
+  ) {
+    return 'phone';
+  }
   if (name === 'clear_chat' || name === 'clear_context') return 'meta';
   return 'chat';
 }

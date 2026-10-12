@@ -31,7 +31,13 @@ const SERIAL_TOOLS = new Set([
   'clear_chat',
   'memory_append',
   'memory_write',
-  'request_phone_notifications',
+  'notification_app_stats',
+  'search_notifications',
+  'notification_digest',
+  'get_notification',
+  'list_notification_apps',
+  'get_more',
+  'draft_reply',
 ]);
 const MEMORY_TOOLS = new Set(['memory_append', 'memory_write']);
 
