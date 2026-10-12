@@ -7,7 +7,6 @@ export type PermissionIntegration =
   | 'github'
   | 'web'
   | 'browser'
-  | 'teams'
   | 'scheduler'
   | 'memory'
   | 'timesheet'
@@ -37,7 +36,6 @@ export const INTEGRATION_LABEL: Record<PermissionIntegration, string> = {
   github: 'GitHub',
   web: 'Web',
   browser: 'Browser',
-  teams: 'Teams',
   scheduler: 'Scheduler',
   memory: 'Memory',
   timesheet: 'Timesheet',
@@ -46,7 +44,7 @@ export const INTEGRATION_LABEL: Record<PermissionIntegration, string> = {
 
 /**
  * Profile-grantable tools. Messaging is notification-only: no email.* or whatsapp.* send/read of full threads.
- * Session controls (think, clear_context, clear_chat, confirm_pending, cancel_pending) stay off profiles.
+ * Session controls (think, clear_context, confirm_pending, cancel_pending) stay off profiles.
  */
 export const PERMISSION_TOOLS: readonly PermissionTool[] = [
   {
@@ -179,25 +177,6 @@ export const PERMISSION_TOOLS: readonly PermissionTool[] = [
     connected: true,
     egress: true,
   },
-  { name: 'teams_open', integration: 'teams', access: 'write', risk: 'low', description: 'Focus an existing Teams tab, or open one if none exists (local extension only).', connected: true },
-  {
-    name: 'teams_list_chats',
-    integration: 'teams',
-    access: 'read',
-    risk: 'low',
-    description: 'List recent Teams chats and channels (local extension only).',
-    connected: true,
-    privateRead: true,
-  },
-  {
-    name: 'teams_read_messages',
-    integration: 'teams',
-    access: 'read',
-    risk: 'low',
-    description: 'Read recent messages from a Teams chat (local extension only).',
-    connected: true,
-    privateRead: true,
-  },
   { name: 'list_schedules', integration: 'scheduler', access: 'read', risk: 'low', description: 'List this user\'s pending and running schedules.', connected: true },
   {
     name: 'schedule_task',
@@ -239,7 +218,6 @@ export const INTEGRATION_ORDER: readonly PermissionIntegration[] = [
   'github',
   'web',
   'browser',
-  'teams',
   'scheduler',
   'memory',
   'timesheet',

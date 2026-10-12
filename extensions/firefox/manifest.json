@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Curtis Bridge",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Lets Curtis (local Discord AI) drive this Firefox session over a localhost WebSocket (ws://, not wss). Debug logs: [CurtisBridge]",
   "browser_specific_settings": {
     "gecko": {
@@ -26,12 +26,5 @@
   "action": {
     "default_title": "Curtis Bridge",
     "default_popup": "popup/popup.html"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://teams.microsoft.com/*", "https://*.teams.microsoft.com/*", "https://outlook.office.com/*", "https://teams.cloud.microsoft/*"],
-      "js": ["content/teams.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }

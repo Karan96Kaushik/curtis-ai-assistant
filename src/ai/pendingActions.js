@@ -133,7 +133,6 @@ function buildSummary(tool, args) {
   if (tool === 'browser_navigate') return `Navigate browser tab\n- URL: ${args.url}${args.tab_id != null ? `\n- Tab: ${args.tab_id}` : ''}`;
   if (tool === 'browser_click') return `Click in browser\n- Selector: ${args.selector}`;
   if (tool === 'browser_type') return `Type in browser\n- Selector: ${args.selector}\n- Text: ${String(args.text || '').slice(0, 200)}`;
-  if (tool === 'teams_open') return `Open Microsoft Teams\n- URL: ${args.url || 'https://teams.cloud.microsoft/'}`;
   if (tool === 'github_create_tag') {
     const lines = [
       'Create GitHub tag',
@@ -175,7 +174,6 @@ function domainFromTool(tool) {
   const name = String(tool || '');
   if (name.startsWith('jira_')) return 'jira';
   if (name.startsWith('github_')) return 'github';
-  if (name.startsWith('teams_')) return 'teams';
   if (name.startsWith('browser_')) return 'browser';
   if (name.startsWith('wf_release_')) return 'release';
   if (
@@ -190,7 +188,7 @@ function domainFromTool(tool) {
   ) {
     return 'phone';
   }
-  if (name === 'clear_chat' || name === 'clear_context') return 'meta';
+  if (name === 'clear_context') return 'meta';
   return 'chat';
 }
 

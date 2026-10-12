@@ -145,7 +145,6 @@ export type ToolIntegration =
   | 'github'
   | 'web'
   | 'browser'
-  | 'teams'
   | 'scheduler'
   | 'memory'
   | 'timesheet'

@@ -61,7 +61,6 @@ registry.register({
 
   intent: (text) => {
     const t = String(text || '').trim();
-    if (/\bteams\b/i.test(t) && !/\bbrowser\b/i.test(t)) return null;
     if (!looksBrowser(t)) return null;
 
     const isWrite =
@@ -112,7 +111,7 @@ registry.register({
       function: {
         name: 'browser_open_tab',
         description:
-          'Open a URL in Firefox (or focus an existing matching tab). Runs immediately. Teams URLs reuse an existing Teams tab.',
+          'Open a URL in Firefox (or focus an existing matching tab). Runs immediately.',
         parameters: {
           type: 'object',
           properties: {
@@ -160,7 +159,7 @@ registry.register({
       function: {
         name: 'browser_click',
         description:
-          'Click an element in the active Firefox tab. Prefer CSS selector when stable (data-tid, role). For visible labels (e.g. Teams chat names), pass text= or selector text:"Opsoft Standup" — do NOT invent title="…" attributes; chat titles are text content. HARD-GATED when confirmation is on.',
+          'Click an element in the active Firefox tab. Prefer CSS selector when stable (data-tid, role). For visible labels, pass text= or selector text:"Label". HARD-GATED when confirmation is on.',
         parameters: {
           type: 'object',
           properties: {
@@ -257,13 +256,13 @@ registry.register({
       'Browser (Firefox extension) rules:',
       '- Use browser_* tools only when the user wants actions in their real Firefox session.',
       '- Prefer browser_read_page / browser_list_tabs / browser_status for reads.',
-      '- browser_open_tab / browser_navigate execute immediately (reuse existing Teams/matching tabs when applicable).',
+      '- browser_open_tab / browser_navigate execute immediately (reuse existing matching tabs when applicable).',
       confirmOn
         ? '- browser_click / browser_type only PROPOSE until confirm_pending.'
         : '- browser_click / browser_type execute immediately.',
       '- If tools report extension offline, tell the user to load the temporary add-on and keep the bot running.',
       '- Do not invent page content — only report tool evidence.',
-      '- Never assume text labels are title="" attributes. For labeled UI (Teams chats, buttons), use browser_click text="Exact label" or selector text:"Exact label".',
+      '- Never assume text labels are title="" attributes. For labeled UI, use browser_click text="Exact label" or selector text:"Exact label".',
     ].join('\n');
   },
 

@@ -1,5 +1,5 @@
 /**
- * Shared confirm gate for mutating tools (Jira, browser, Teams, …).
+ * Shared confirm gate for mutating tools (Jira, browser, GitHub, …).
  */
 
 const pendingActions = require('../ai/pendingActions');

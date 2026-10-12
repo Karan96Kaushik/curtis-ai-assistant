@@ -14,6 +14,10 @@ const LEGACY_TOOL_MAP: Record<string, readonly string[]> = {
   'email.list': ['notification_app_stats', 'search_notifications', 'notification_digest', 'list_notification_apps'],
   'email.get': ['get_notification', 'get_more'],
   'push.send': ['send_push_notification'],
+  teams_open: [],
+  teams_list_chats: [],
+  teams_read_messages: [],
+  clear_chat: [],
 };
 
 /**

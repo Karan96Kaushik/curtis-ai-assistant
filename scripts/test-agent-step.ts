@@ -427,11 +427,20 @@ describe('agent step loop', () => {
 
 describe('profile rules', () => {
   it('maps legacy phone tools and requires approval for schedule_task', () => {
-    const tools = normalizeAllowedTools(['request_phone_notifications', 'schedule_task']);
+    const tools = normalizeAllowedTools([
+      'request_phone_notifications',
+      'schedule_task',
+      'teams_open',
+      'teams_list_chats',
+      'clear_chat',
+    ]);
     assert.ok(tools.includes('search_notifications'));
     assert.ok(tools.includes('notification_app_stats'));
     assert.ok(tools.includes('schedule_task'));
     assert.equal(tools.includes('request_phone_notifications'), false);
+    assert.equal(tools.includes('teams_open'), false);
+    assert.equal(tools.includes('teams_list_chats'), false);
+    assert.equal(tools.includes('clear_chat'), false);
     assert.deepEqual(ensureEgressApproval(tools, []), ['schedule_task']);
   });
 
@@ -447,6 +456,10 @@ describe('profile rules', () => {
     }
     assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'email.list'), false);
     assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'request_phone_notifications'), false);
+    assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'teams_open'), false);
+    assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'teams_list_chats'), false);
+    assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'teams_read_messages'), false);
+    assert.equal(PERMISSION_TOOLS.some((tool) => tool.name === 'clear_chat'), false);
     assert.equal(egressToolNames(PERMISSION_TOOLS).has('schedule_task'), true);
     assert.equal(egressToolNames(PERMISSION_TOOLS).has('send_push_notification'), false);
   });
@@ -611,7 +624,7 @@ describe('notification store helpers', () => {
     assert.equal(executePending?.available === false, false);
 
     const other = profile({
-      allowed_tools: ['web_search', 'web_fetch_page', 'memory_read', 'timesheet_draft', 'browser_status', 'teams_list_chats'],
+      allowed_tools: ['web_search', 'web_fetch_page', 'memory_read', 'timesheet_draft', 'browser_status'],
       system_prompt: 'Other tools.',
     });
     const otherTools = toModelTools(toolsForProfile(other)).map((tool) => tool.function.name);
@@ -621,7 +634,6 @@ describe('notification store helpers', () => {
       'memory_read',
       'timesheet_draft',
       'browser_status',
-      'teams_list_chats',
     ]) {
       assert.ok(otherTools.includes(name), name);
       assert.equal(TOOLS.find((tool) => tool.name === name)?.available === false, false, name);

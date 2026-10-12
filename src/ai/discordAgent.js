@@ -28,7 +28,6 @@ const SERIAL_TOOLS = new Set([
   'confirm_pending',
   'cancel_pending',
   'clear_context',
-  'clear_chat',
   'memory_append',
   'memory_write',
   'notification_app_stats',
@@ -230,10 +229,6 @@ function coerceArgs(name, args) {
   if (name === 'memory_read' && out.max_chars != null) {
     out.max_chars = Number(out.max_chars);
   }
-  if (name === 'clear_chat' && out.limit != null) {
-    out.limit = Number(out.limit);
-  }
-
   if (name?.startsWith('github_')) {
     if (out.max != null) out.max = Number(out.max);
     if (out.number != null) out.number = Number(out.number);
@@ -292,7 +287,7 @@ function buildSystemPrompt(discordCtx, turn) {
           'Pending action awaiting user confirmation:',
           pending.summary,
           `Tool: ${pending.tool}`,
-          'If this user message is an explicit yes/confirm → call confirm_pending (applies to Jira, GitHub, browser, Teams, or release).',
+          'If this user message is an explicit yes/confirm → call confirm_pending (applies to Jira, GitHub, browser, or release).',
           'If they decline → call cancel_pending.',
           'If they want changes → call the propose tool again with revised args (replaces pending), then ask again.',
         ].join('\n')
@@ -301,9 +296,9 @@ function buildSystemPrompt(discordCtx, turn) {
     confirmationBlock = [
       'Confirmation: REQUIRED for gated writes (hard gate).',
       `- Gated writes only PROPOSE until confirm_pending succeeds: ${[...registry.getMutatingTools()].join(', ')}.`,
-      '- teams_open, browser_open_tab, and browser_navigate execute immediately (focus existing when possible).',
+      '- browser_open_tab and browser_navigate execute immediately (focus existing when possible).',
       '- Never claim a gated write succeeded until confirm_pending returns success.',
-      '- Never invent "Jira" wording for a Teams/browser/GitHub/release pending action.',
+      '- Never invent "Jira" wording for a browser/GitHub/release pending action.',
       '',
       pendingBlock,
     ].join('\n');
@@ -453,11 +448,11 @@ async function repairUngroundedReply(messages, draft, toolResults, evidence) {
 function shouldSynthesize(intent, toolResults) {
   if (!toolResults.length) return false;
   if (intent.mode === 'agenda' || intent.mode === 'research') return true;
-  if (intent.domain === 'web' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'teams' || intent.domain === 'release') return true;
+  if (intent.domain === 'web' || intent.domain === 'jira' || intent.domain === 'github' || intent.domain === 'browser' || intent.domain === 'release') return true;
   if (intent.isWorkAgenda || intent.isIssueList || intent.isIssueDetail) return true;
   return toolResults.some((t) =>
     (/^(jira|github)_/.test(t.name) && !registry.isMutatingTool(t.name)) ||
-    ['web_search', 'web_fetch_page', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'teams_list_chats', 'teams_read_messages', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
+    ['web_search', 'web_fetch_page', 'jira_my_issues', 'jira_get_issue', 'jira_monthly_activity', 'memory_read', 'browser_read_page', 'browser_list_tabs', 'github_search_repos', 'github_list_repos', 'github_list_tags', 'github_search_prs', 'github_get_pr', 'github_monthly_activity', 'wf_release_start', 'wf_release_draft', 'wf_release_revise_draft', 'wf_release_approve_draft', 'wf_release_status', 'wf_release_advance', 'wf_release_execute_pending'].includes(t.name)
   );
 }
 

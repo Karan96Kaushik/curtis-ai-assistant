@@ -150,10 +150,10 @@ phoneTools.configure(async (name, userId, args) => {
 
 /**
  * Modules that need the local bot process: the Firefox extension bridge
- * (browser, teams) and the Discord scheduler (local JSON file + DMs).
+ * (browser) and the Discord scheduler (local JSON file + DMs).
  * The web scheduler is registered in its place and stores jobs in Supabase.
  */
-const LOCAL_ONLY_MODULES = ['browser', 'teams', 'scheduler'];
+const LOCAL_ONLY_MODULES = ['browser', 'scheduler'];
 
 for (const id of LOCAL_ONLY_MODULES) registry.unregister(id);
 
@@ -195,10 +195,6 @@ if (process.env.CURTIS_SURFACE === 'web') {
     },
   });
 }
-
-// There is no Discord channel to purge on the web; "clear the chat" resets agent memory.
-const clearContext = registry.getToolHandler('clear_context');
-if (clearContext) registry.toolHandlers.set('clear_chat', clearContext);
 
 const MAX_STATE_FILE_BYTES = 512 * 1024;
 const PENDING_TTL_MS = Number(process.env.PENDING_ACTION_TTL_MS) || 30 * 60 * 1000;
