@@ -113,7 +113,8 @@ registry.register({
     return [
       'Phone notifications:',
       `- Call ${phone.TOOL_NAME} with duration_minutes when the user asks what arrived on their phone.`,
-      `- duration_minutes must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES}. Do not ask for 24 hours unless the question needs a full day.`,
+      `- duration_minutes must be an integer.`,
+      // `- duration_minutes must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES}. Do not ask for 24 hours unless the question needs a full day.`,
       '- The call reads that window immediately for the signed-in user. Do not ask for confirmation and do not call confirm_pending for this tool.',
       '- Phone notifications are private (email, promotions, one-time codes, and messages). Never claim you saw a notification that the tool did not return.',
       '- Do not store notification text in memory.',
