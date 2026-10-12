@@ -14,11 +14,20 @@ import {
 } from './conversationTurn.js';
 import { proposeBehavior } from './proposeBehavior.js';
 
+interface ModelDebugCall {
+  model: string;
+  messages: unknown[];
+  tools?: unknown[];
+  toolChoice?: string | object;
+}
+
 interface TurnCtx {
   model: string;
   signal: AbortSignal;
   switches: { from: string; to: string }[];
   failedModels?: string[];
+  debugContext?: boolean;
+  modelDebug?: ModelDebugCall[];
 }
 
 const { runWithTurn } = aiRouter as unknown as {
@@ -33,6 +42,8 @@ interface ChatRequest {
   model?: string;
   /** Client id for this turn, so Stop can mark it cancelled. */
   turnId?: string;
+  /** Return every model request payload from this turn (messages, tools, model id). */
+  debugContext?: boolean;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -62,6 +73,10 @@ function requestedModel(body: ChatRequest): string {
   return resolveAgentModel(body.model, process.env.GROQ_MODEL);
 }
 
+function requestedDebugContext(body: ChatRequest): boolean {
+  return body.debugContext === true;
+}
+
 function requestedTurnId(body: ChatRequest): string | null {
   if (body.turnId == null || body.turnId === '') return null;
   if (typeof body.turnId !== 'string' || !UUID_RE.test(body.turnId)) throw new HttpError(400, 'turnId must be a UUID');
@@ -82,7 +97,7 @@ export const handler = withHttp('chat', async (event) => {
     const turnId = requestedTurnId(body);
     const controller = new AbortController();
     const stopWatch = watchCancellation(db, behaviorConversationId, turnId, controller);
-    const behaviorTurn: TurnCtx = { model, signal: controller.signal, switches: [] };
+    const behaviorTurn: TurnCtx = { model, signal: controller.signal, switches: [], debugContext: requestedDebugContext(body) };
     try {
       return await runWithTurn(behaviorTurn, () => proposeBehavior(db, behaviorConversationId));
     } catch (err) {
@@ -112,7 +127,8 @@ export const handler = withHttp('chat', async (event) => {
 
   const controller = new AbortController();
   const stopWatch = watchCancellation(db, conversation.id, turnId, controller);
-  const turnCtx: TurnCtx = { model, signal: controller.signal, switches: [] };
+  const debugContext = requestedDebugContext(body);
+  const turnCtx: TurnCtx = { model, signal: controller.signal, switches: [], debugContext };
   try {
     const result = await runWithTurn(turnCtx, () =>
       executeConversationPrompt({
@@ -130,6 +146,8 @@ export const handler = withHttp('chat', async (event) => {
         switches: turnCtx.switches,
       })
     );
+    const modelDebug =
+      debugContext && turnCtx.modelDebug?.length ? turnCtx.modelDebug : undefined;
     if (result.kind === 'cancelled') {
       return json(200, {
         cancelled: true,
@@ -141,6 +159,7 @@ export const handler = withHttp('chat', async (event) => {
         userMessage: result.userMessage,
         reply: null,
         pending: result.pending,
+        modelDebug,
       });
     }
     return json(200, {
@@ -148,6 +167,7 @@ export const handler = withHttp('chat', async (event) => {
       userMessage: result.userMessage,
       reply: result.reply,
       pending: result.pending,
+      modelDebug,
     });
   } finally {
     stopWatch();
