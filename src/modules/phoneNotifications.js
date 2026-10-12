@@ -62,7 +62,7 @@ registry.register({
         description:
           'Read the signed-in user\'s own phone notifications for a limited recent window. ' +
           'Covers private device notifications: email, promotions, one-time codes, and personal messages. ' +
-          `duration_minutes is required and must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES} (24 hours). ` +
+          `duration_minutes is required and must be an integer from ${phone.MIN_DURATION_MINUTES} to ${phone.MAX_DURATION_MINUTES}. ` +
           'The read runs immediately on the server. Do not ask the user to confirm. ' +
           'Call this only when the user asked about notifications on their phone, and pick the shortest window that answers them.',
         parameters: {

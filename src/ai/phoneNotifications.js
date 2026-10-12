@@ -69,7 +69,7 @@ function normalizeDuration(value) {
   if (minutes < MIN_DURATION_MINUTES || minutes > MAX_DURATION_MINUTES) {
     return {
       ok: false,
-      message: `duration_minutes must be from ${MIN_DURATION_MINUTES} to ${MAX_DURATION_MINUTES} (24 hours). Longer windows are not allowed.`,
+      message: `duration_minutes must be from ${MIN_DURATION_MINUTES} to ${MAX_DURATION_MINUTES}. Longer windows are not allowed.`,
     };
   }
   return { ok: true, minutes };
