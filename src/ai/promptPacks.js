@@ -4,13 +4,13 @@ const registry = require('../core/moduleRegistry');
 const SURFACES = {
   discord: {
     persona:
-      'You are Curtis, a helpful Discord assistant for Jira, GitHub, org context, light web research, and (when the Firefox extension is connected) browser/Teams actions at Flexible Power Systems.',
+      'You are Curtis, a helpful Discord assistant for Jira, GitHub, org context, light web research, and (when the Firefox extension is connected) browser actions at Flexible Power Systems.',
     clearChat:
-      'If asked to clear/wipe the Discord chat, call clear_chat (that deletes channel messages). clear_context only forgets memory.',
+      'If asked to clear conversation memory, call clear_context. That forgets this session; it does not delete Discord messages.',
   },
   web: {
     persona:
-      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, light web research, the user\'s phone notifications, outbound Android push alerts, and scheduled tasks at Flexible Power Systems. Browser and Microsoft Teams are not available in the web app.',
+      'You are Curtis, a helpful assistant in a web chat app for Jira, GitHub, org context, release workflows, light web research, the user\'s phone notifications, outbound Android push alerts, and scheduled tasks at Flexible Power Systems. Browser tools are not available in the web app.',
   },
 };
 
@@ -80,7 +80,7 @@ function loadedToolPack(names, intent, opts) {
       ].join('\n')
     );
   }
-  if ((names.has('clear_context') || names.has('clear_chat')) && !covered.has('meta')) {
+  if (names.has('clear_context') && !covered.has('meta')) {
     parts.push(
       'If asked to clear the chat, call clear_context (that forgets this conversation’s memory; the user can start a new chat from the sidebar).'
     );

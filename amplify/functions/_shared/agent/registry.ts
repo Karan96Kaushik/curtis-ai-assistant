@@ -18,7 +18,7 @@ import {
   PUSH_URGENCIES,
 } from '../../../../lib/push/payload.js';
 import { sendPushToUser } from '../fcm.js';
-import { BROWSER_TEAMS_TOOLS } from './browserTeamsTools.js';
+import { BROWSER_TOOLS } from './browserTools.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import { JIRA_TOOLS } from './jiraTools.js';
 import { MEMORY_TOOLS } from './memoryTools.js';
@@ -530,7 +530,7 @@ export const TOOLS: ToolDef[] = [
   ...WEB_TOOLS,
   ...MEMORY_TOOLS,
   ...TIMESHEET_TOOLS,
-  ...BROWSER_TEAMS_TOOLS,
+  ...BROWSER_TOOLS,
 ];
 
 for (const tool of PERMISSION_TOOLS) {

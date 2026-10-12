@@ -15,7 +15,7 @@ const bridge = extensionBridge as unknown as {
 };
 
 const LOCAL_ONLY =
-  'Firefox extension offline. Browser and Teams tools need the local Curtis Firefox add-on on the Discord bot host — they are not available in Amplify cloud agent runs.';
+  'Firefox extension offline. Browser tools need the local Curtis Firefox add-on on the Discord bot host — they are not available in Amplify cloud agent runs.';
 
 function offline(error?: string): { text: string } {
   return { text: error ? `${LOCAL_ONLY} (${error})` : LOCAL_ONLY };
@@ -34,10 +34,10 @@ const optInt = z.coerce.number().int().optional();
 const optBool = z.boolean().optional();
 
 /**
- * Browser + Teams via the Firefox extension bridge.
+ * Browser tools via the Firefox extension bridge.
  * In Amplify Lambdas the bridge is almost always offline; handlers return a clear message.
  */
-export const BROWSER_TEAMS_TOOLS: ToolDef[] = [
+export const BROWSER_TOOLS: ToolDef[] = [
   {
     name: 'browser_status',
     integration: 'browser',
@@ -153,50 +153,6 @@ export const BROWSER_TEAMS_TOOLS: ToolDef[] = [
         text: args.text,
         clear: args.clear !== false,
         tabId: args.tab_id,
-      }),
-  },
-  {
-    name: 'teams_open',
-    integration: 'teams',
-    access: 'write',
-    risk: 'low',
-    description: 'Focus an existing Teams tab, or open one if none exists (local Firefox extension only).',
-    schema: z.object({
-      url: optStr,
-    }),
-    maxResultChars: 2000,
-    handler: async (args) =>
-      rpc('teams.open', {
-        url: String(args.url || '').trim() || 'https://teams.microsoft.com',
-      }),
-  },
-  {
-    name: 'teams_list_chats',
-    integration: 'teams',
-    access: 'read',
-    risk: 'low',
-    description: 'List recent Teams chats and channels (local Firefox extension only).',
-    schema: z.object({
-      max: optInt,
-    }),
-    maxResultChars: 6000,
-    handler: async (args) => rpc('teams.listChats', { max: args.max || 20 }),
-  },
-  {
-    name: 'teams_read_messages',
-    integration: 'teams',
-    access: 'read',
-    risk: 'low',
-    description: 'Read recent messages from a Teams chat (local Firefox extension only).',
-    schema: z.object({
-      chat_title: optStr,
-      max: optInt,
-    }),
-    maxResultChars: 10000,
-    handler: async (args) =>
-      rpc('teams.readMessages', {
-        chatTitle: args.chat_title,
-        max: args.max || 30,
       }),
   },
 ];

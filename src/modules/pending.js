@@ -4,7 +4,7 @@ const config = require('../config');
 const { runConfirmedPending } = require('../util/mutatingGate');
 
 /** Domains whose modules stage gated writes. */
-const GATED_DOMAINS = new Set(['jira', 'github', 'browser', 'teams', 'release']);
+const GATED_DOMAINS = new Set(['jira', 'github', 'browser', 'release']);
 
 registry.register({
   id: 'pending',
@@ -20,7 +20,7 @@ registry.register({
       function: {
         name: 'confirm_pending',
         description:
-          'Execute the pending mutating action (Jira, GitHub, browser, Teams, release). Only after explicit user confirmation.',
+          'Execute the pending mutating action (Jira, GitHub, browser, release). Only after explicit user confirmation.',
         parameters: { type: 'object', properties: {} },
       },
     },

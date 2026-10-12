@@ -9,7 +9,6 @@ const { startTimer } = require('../src/util/timing');
 const config = require('../src/config');
 const scheduler = require('../src/core/scheduler');
 const extensionBridge = require('../src/integrations/extensionBridge');
-const discordGateway = require('../src/integrations/discordGateway');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const APP_ID = process.env.DISCORD_APP_ID || process.env.DISCORD_CLIENT_ID;
@@ -346,7 +345,6 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (readyClient) => {
-  discordGateway.setClient(readyClient);
   console.log(`Discord gateway connected as ${readyClient.user.tag}`);
   console.log(
     `REQUIRE_CONFIRMATION=${config.REQUIRE_CONFIRMATION} (toggle in src/config.js or env)`
