@@ -8,9 +8,12 @@ import ExportChatButton from '@/components/chat/ExportChatButton';
 import MessageBubble from '@/components/chat/MessageBubble';
 import PendingActionBar from '@/components/chat/PendingActionBar';
 import RememberBehaviorButton from '@/components/chat/RememberBehaviorButton';
+import ModelContextDebugger from '@/components/chat/ModelContextDebugger';
+import ModelDebugToggle from '@/components/chat/ModelDebugToggle';
 import WorkingIndicator from '@/components/chat/WorkingIndicator';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/hooks/useChat';
+import { useModelDebug } from '@/hooks/useModelDebug';
 import { useConversations } from '@/hooks/useConversations';
 import { functionsConfigured } from '@/lib/amplify/client';
 import { durationBeforeReply } from '@/lib/chat/duration';
@@ -25,13 +28,18 @@ export default function ChatView() {
   const modelRef = useRef(model);
   modelRef.current = model;
 
+  const { enabled: modelDebugEnabled, toggle: toggleModelDebug } = useModelDebug();
+  const modelDebugRef = useRef(modelDebugEnabled);
+  modelDebugRef.current = modelDebugEnabled;
+
   const onConversationCreated = useCallback(
     (id: string) => navigate(`/c/${id}`, { replace: true }),
     [navigate]
   );
-  const { messages, pending, loading, sending, notFound, send, cancel } = useChat(conversationId, {
+  const { messages, pending, loading, sending, notFound, send, cancel, turnModelDebug } = useChat(conversationId, {
     onConversationCreated,
     modelRef,
+    modelDebugRef,
   });
 
   const title = conversations.find((c) => c.id === conversationId)?.title;
@@ -54,6 +62,7 @@ export default function ChatView() {
         <div className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
           <h1 className="hidden min-w-0 flex-1 truncate text-sm font-medium md:block">{title ?? 'Chat'}</h1>
           <div className="ml-auto flex items-center gap-2">
+            <ModelDebugToggle enabled={modelDebugEnabled} disabled={disabled} onToggle={toggleModelDebug} />
             <ExportChatButton title={title ?? 'Chat'} messages={messages} disabled={loading || notFound || messages.length === 0} />
             <RememberBehaviorButton
               conversationId={conversationId}
@@ -81,7 +90,10 @@ export default function ChatView() {
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
             {messages.map((m, i) => (
-              <MessageBubble key={m.id} message={m} durationMs={durationBeforeReply(messages, i)} />
+              <div key={m.id} className="flex flex-col gap-3">
+                <MessageBubble message={m} durationMs={durationBeforeReply(messages, i)} />
+                {turnModelDebug?.messageId === m.id && <ModelContextDebugger calls={turnModelDebug.calls} />}
+              </div>
             ))}
             {sending && <WorkingIndicator />}
             <div ref={bottomRef} />
@@ -97,6 +109,11 @@ export default function ChatView() {
             onConfirm={() => void send('yes')}
             onCancel={() => void send('cancel')}
           />
+        )}
+        {!conversationId && (
+          <div className="flex justify-end">
+            <ModelDebugToggle enabled={modelDebugEnabled} disabled={disabled} onToggle={toggleModelDebug} />
+          </div>
         )}
         <Composer
           conversationId={conversationId}

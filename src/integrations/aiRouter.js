@@ -8,6 +8,7 @@ const groq = require('./groqClient');
 const google = require('./googleAiClient');
 const openrouter = require('./openRouterClient');
 const catalog = require('./modelCatalog');
+const { appendModelDebug } = require('./modelDebugCapture');
 
 function providerLabel(modelId) {
   const id = modelId || groq.activeModel();
@@ -82,6 +83,7 @@ async function chat(opts = {}) {
     if (signal?.aborted) throw abortError();
     tried.push(id);
     try {
+      appendModelDebug(turn, id, opts);
       const result = await dispatch({ ...opts, model: id, signal });
       if (!hasOutput(result)) {
         const err = new Error('The model returned an empty response');

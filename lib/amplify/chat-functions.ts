@@ -1,6 +1,7 @@
 import { callFunction } from './client';
 import type { ChatMessage, ConversationSummary } from '@/lib/supabase/types';
 import type { PendingAction } from '@/lib/chat/pending';
+import type { ModelDebugCall } from '@/lib/chat/modelDebug';
 
 export interface SendChatRequest {
   /** Omit to start a new conversation. */
@@ -10,6 +11,8 @@ export interface SendChatRequest {
   model?: string;
   /** Id the Stop button uses to cancel this turn. */
   turnId?: string;
+  /** When true, the response includes every model request from this turn. */
+  debugContext?: boolean;
 }
 
 export interface SendChatResponse {
@@ -19,6 +22,8 @@ export interface SendChatResponse {
   reply: ChatMessage | null;
   pending: PendingAction | null;
   cancelled?: boolean;
+  /** Present when debugContext was true on the request. */
+  modelDebug?: ModelDebugCall[];
 }
 
 export function sendChatMessage(request: SendChatRequest, signal?: AbortSignal): Promise<SendChatResponse> {

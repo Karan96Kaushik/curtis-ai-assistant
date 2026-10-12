@@ -7,6 +7,7 @@ import type { PendingAction } from '@/lib/chat/pending';
 import { parsePendingAction } from '@/lib/chat/pending';
 import { createConversation, deleteConversation, getConversationPending, requestCancel } from '@/lib/supabase/conversations';
 import { listMessages } from '@/lib/supabase/messages';
+import type { ModelDebugCall } from '@/lib/chat/modelDebug';
 import type { ChatMessage } from '@/lib/supabase/types';
 import { supabase } from '@/utils/supabase';
 
@@ -20,6 +21,8 @@ interface UseChatOptions {
   onConversationCreated(id: string): void;
   /** Current Groq model id. A ref so Send does not wait on a re-render. */
   modelRef: RefObject<string>;
+  /** When true, the chat function returns model request payloads for review. */
+  modelDebugRef: RefObject<boolean>;
 }
 
 function titleFromMessage(text: string): string {
@@ -50,12 +53,18 @@ function mergeMessages(rows: DisplayMessage[], incoming: ChatMessage[]): Display
   return incoming.reduce(mergeMessage, rows);
 }
 
-export function useChat(conversationId: string | null, { onConversationCreated, modelRef }: UseChatOptions) {
+export interface TurnModelDebug {
+  messageId: string;
+  calls: ModelDebugCall[];
+}
+
+export function useChat(conversationId: string | null, { onConversationCreated, modelRef, modelDebugRef }: UseChatOptions) {
   const { touch, noteActivity } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [turnModelDebug, setTurnModelDebug] = useState<TurnModelDebug | null>(null);
   // The conversation that owns the in-flight turn. ChatView stays mounted across
   // /c/:id changes, so a bare boolean would show "working" on every chat.
   const inflightRef = useRef<string | null>(null);
@@ -74,6 +83,7 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
     if (!conversationId) {
       setMessages([]);
       setPending(null);
+      setTurnModelDebug(null);
       return;
     }
     if (justCreated.current === conversationId) {
@@ -85,6 +95,7 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
     setLoading(true);
     setMessages([]);
     setPending(null);
+    setTurnModelDebug(null);
     Promise.all([listMessages(conversationId), getConversationPending(conversationId)])
       .then(([rows, pendingAction]) => {
         if (!active) return;
@@ -180,7 +191,13 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
 
         turnRef.current = { conversationId: targetId, turnId };
         const res = await sendChatMessage(
-          { conversationId: targetId, message, model: modelRef.current, turnId },
+          {
+            conversationId: targetId,
+            message,
+            model: modelRef.current,
+            turnId,
+            debugContext: modelDebugRef.current,
+          },
           controller.signal
         );
         if (controller.signal.aborted) return true;
@@ -190,6 +207,11 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         if (res.cancelled || !res.reply) {
           if (stillHere) {
             setMessages((rows) => mergeMessages(rows.filter((m) => m.id !== optimistic.id), [res.userMessage]));
+            if (res.modelDebug?.length) {
+              setTurnModelDebug({ messageId: res.userMessage.id, calls: res.modelDebug });
+            } else {
+              setTurnModelDebug(null);
+            }
           }
           return true;
         }
@@ -202,6 +224,11 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
             )
           );
           setPending(parsePendingAction(res.pending));
+          if (res.modelDebug?.length) {
+            setTurnModelDebug({ messageId: res.reply!.id, calls: res.modelDebug });
+          } else {
+            setTurnModelDebug(null);
+          }
         }
         if (res.reply.role === 'error') {
           restoreComposerDraft(targetId, message);
@@ -232,8 +259,8 @@ export function useChat(conversationId: string | null, { onConversationCreated, 
         }
       }
     },
-    [conversationId, touch, onConversationCreated, modelRef]
+    [conversationId, touch, onConversationCreated, modelRef, modelDebugRef]
   );
 
-  return { messages, pending, loading, sending, notFound, send, cancel };
+  return { messages, pending, loading, sending, notFound, send, cancel, turnModelDebug };
 }
