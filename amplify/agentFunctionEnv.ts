@@ -38,6 +38,8 @@ export function agentFunctionEnvironment() {
     BEHAVIOR_MEMORY_PATH: `${STATE_DIR}/behavior.md`,
     WF_RELEASE_DIR: `${STATE_DIR}/releases`,
     GROQ_API_KEY: secret('GROQ_API_KEY'),
+    GROQ_API_KEY_2: secret('GROQ_API_KEY_2'),
+    GROQ_API_KEY_3: secret('GROQ_API_KEY_3'),
     GOOGLE_AI_STUDIO_API_KEY: secret('GOOGLE_AI_STUDIO_API_KEY'),
     OPENROUTER_API_KEY: secret('OPENROUTER_API_KEY'),
     JIRA_API_TOKEN: secret('JIRA_API_TOKEN'),

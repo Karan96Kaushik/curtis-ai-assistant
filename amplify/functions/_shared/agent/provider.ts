@@ -10,7 +10,38 @@ const ENDPOINTS: Record<ProviderName, { url: string; env: string }> = {
   openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions', env: 'OPENROUTER_API_KEY' },
 };
 
+/** Same key pool as src/integrations/groqClient.js — rotate on HTTP 429 only. */
+const GROQ_KEY_ENVS = ['GROQ_API_KEY', 'GROQ_API_KEY_2', 'GROQ_API_KEY_3'] as const;
+
+let groqKeyRoundRobin = 0;
+
 const CALL_TIMEOUT_MS = 18_000;
+
+function groqApiKeys(): string[] {
+  return GROQ_KEY_ENVS.map((name) => process.env[name]?.trim() ?? '').filter(Boolean);
+}
+
+function providerApiKeys(provider: ProviderName): string[] {
+  if (provider === 'groq') return groqApiKeys();
+  const env = ENDPOINTS[provider].env;
+  const key = process.env[env]?.trim() ?? '';
+  return key ? [key] : [];
+}
+
+function isGroqRateLimited(status: number, payload: unknown, raw: string): boolean {
+  if (status === 429) return true;
+  const row = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  const errObj = row?.error && typeof row.error === 'object' ? (row.error as Record<string, unknown>) : null;
+  const code = String(row?.code ?? errObj?.code ?? '').toLowerCase();
+  if (code.includes('rate_limit')) return true;
+  const msg = (extractErrorText(payload) || raw).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit') ||
+    msg.includes('too many requests')
+  );
+}
 
 interface ChatCompletion {
   choices?: { message?: ChoiceMessage }[];
@@ -247,8 +278,8 @@ export async function callModelChain(opts: {
     const current = chain[i];
     const next = chain[i + 1];
     const endpoint = ENDPOINTS[current.provider];
-    const key = process.env[endpoint.env]?.trim() ?? '';
-    if (!key) {
+    const keys = providerApiKeys(current.provider);
+    if (!keys.length) {
       lastMessage = `${current.provider} is not configured.`;
       if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: 0 });
       continue;
@@ -267,78 +298,116 @@ export async function callModelChain(opts: {
     }
 
     const started = Date.now();
-    let res: Response;
-    try {
-      res = await fetchImpl(endpoint.url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-      });
-    } catch (err) {
-      const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-      const detail = timedOut
-        ? `${current.provider} timed out.`
-        : `${current.provider} request failed${err instanceof Error && err.message ? `: ${err.message}` : '.'}`;
-      lastMessage = detail.slice(0, 480);
-      retryable = true;
-      delaySeconds = Math.max(delaySeconds, 30);
-      if (next) {
-        fallbacks.push({
-          from: `${current.provider}:${current.model}`,
-          to: `${next.provider}:${next.model}`,
-          status: timedOut ? 408 : 0,
-          detail: lastMessage,
+    const modelId = String(body.model ?? '');
+    let groqAllKeysRateLimited = false;
+    let lastRateLimitResponse: Response | null = null;
+
+    keyAttempt: for (let ki = 0; ki < keys.length; ki += 1) {
+      const keyIndex = current.provider === 'groq' ? (groqKeyRoundRobin + ki) % keys.length : 0;
+      const key = keys[keyIndex];
+      const keyLabel = current.provider === 'groq' ? GROQ_KEY_ENVS[keyIndex] ?? `key#${keyIndex}` : endpoint.env;
+
+      let res: Response;
+      try {
+        res = await fetchImpl(endpoint.url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
         });
-      }
-      continue;
-    }
-
-    const raw = await res.text();
-    let payload: ChatCompletion | null = null;
-    try {
-      payload = raw ? (JSON.parse(raw) as ChatCompletion) : null;
-    } catch {
-      payload = null;
-    }
-
-    if (!res.ok) {
-      lastMessage = providerErrorDetail(res.status, current.provider, raw, payload);
-      const retry = res.status === 429 || res.status >= 500;
-      if (retry) {
+      } catch (err) {
+        const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+        const detail = timedOut
+          ? `${current.provider} timed out.`
+          : `${current.provider} request failed${err instanceof Error && err.message ? `: ${err.message}` : '.'}`;
+        lastMessage = detail.slice(0, 480);
         retryable = true;
-        delaySeconds = Math.max(delaySeconds, res.status === 429 ? retryAfterSeconds(res) : 30);
+        delaySeconds = Math.max(delaySeconds, 30);
+        if (next) {
+          fallbacks.push({
+            from: `${current.provider}:${current.model}`,
+            to: `${next.provider}:${next.model}`,
+            status: timedOut ? 408 : 0,
+            detail: lastMessage,
+          });
+        }
+        continue;
       }
+
+      const raw = await res.text();
+      let payload: ChatCompletion | null = null;
+      try {
+        payload = raw ? (JSON.parse(raw) as ChatCompletion) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        lastMessage = providerErrorDetail(res.status, current.provider, raw, payload);
+        if (current.provider === 'groq' && isGroqRateLimited(res.status, payload, raw)) {
+          console.warn(`[groq] 429 rate limit on ${keyLabel} model=${modelId}; trying next key`);
+          lastRateLimitResponse = res;
+          if (ki < keys.length - 1) continue keyAttempt;
+          groqAllKeysRateLimited = true;
+          break keyAttempt;
+        }
+        const retry = res.status === 429 || res.status >= 500;
+        if (retry) {
+          retryable = true;
+          delaySeconds = Math.max(delaySeconds, res.status === 429 ? retryAfterSeconds(res) : 30);
+        }
+        if (next) {
+          fallbacks.push({
+            from: `${current.provider}:${current.model}`,
+            to: `${next.provider}:${next.model}`,
+            status: res.status,
+            detail: lastMessage,
+          });
+        }
+        continue;
+      }
+
+      if (current.provider === 'groq') {
+        groqKeyRoundRobin = (keyIndex + 1) % keys.length;
+      }
+
+      const message = payload?.choices?.[0]?.message;
+      const text = typeof message?.content === 'string' ? message.content : '';
+      let toolCalls = parseToolCalls(message);
+      if (!toolCalls.length && text) toolCalls = lenientToolCalls(text);
+      return {
+        kind: 'ok',
+        text,
+        toolCalls,
+        usage: {
+          provider: current.provider,
+          model: current.model,
+          tokens: usageTokens(payload ?? {}, raw.length),
+          latencyMs: Date.now() - started,
+        },
+        fallbacks,
+      };
+    }
+
+    if (groqAllKeysRateLimited) {
+      retryable = true;
+      delaySeconds = Math.max(
+        delaySeconds,
+        lastRateLimitResponse ? retryAfterSeconds(lastRateLimitResponse) : 30
+      );
       if (next) {
         fallbacks.push({
           from: `${current.provider}:${current.model}`,
           to: `${next.provider}:${next.model}`,
-          status: res.status,
+          status: 429,
           detail: lastMessage,
         });
       }
       continue;
     }
-
-    const message = payload?.choices?.[0]?.message;
-    const text = typeof message?.content === 'string' ? message.content : '';
-    let toolCalls = parseToolCalls(message);
-    if (!toolCalls.length && text) toolCalls = lenientToolCalls(text);
-    return {
-      kind: 'ok',
-      text,
-      toolCalls,
-      usage: {
-        provider: current.provider,
-        model: current.model,
-        tokens: usageTokens(payload ?? {}, raw.length),
-        latencyMs: Date.now() - started,
-      },
-      fallbacks,
-    };
   }
 
   if (retryable) return { kind: 'rate_limited', delaySeconds: Math.min(900, delaySeconds), fallbacks };
