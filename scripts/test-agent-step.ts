@@ -752,6 +752,9 @@ describe('context and tool output', () => {
     );
     assert.deepEqual(unknown, ['not-a-model']);
     assert.equal(apiModelId('openrouter', 'openrouter:nvidia/nemotron-3.5-lightning:free'), 'nvidia/nemotron-3.5-lightning:free');
+    const vertex = chainFromModelIds(['vertex:gemini-3.1-pro-preview']);
+    assert.equal(vertex.chain[0]?.provider, 'google_vertex');
+    assert.equal(apiModelId('google_vertex', 'vertex:gemini-3.1-pro-preview'), 'gemini-3.1-pro-preview');
   });
 
   it('refuses a status change that the run has left', async () => {

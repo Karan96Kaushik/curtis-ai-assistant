@@ -85,9 +85,9 @@ Jira commands cover create, update, comments, assigned issues, and a monthly act
 
 [`.env.example`](.env.example) lists every variable. Two groups matter:
 
-**Web (Vite + Lambda).** `VITE_SUPABASE_*_CURTIS` and `ALLOWED_EMAILS` are required. Non-secret integration settings (`JIRA_BASE_URL`, `JIRA_EMAIL`, `GROQ_MODEL`, `REQUIRE_CONFIRMATION`, GitHub activity filters, and so on) are copied into the Lambda at synth time. Secrets (`GROQ_API_KEY`, `GOOGLE_AI_STUDIO_API_KEY`, `OPENROUTER_API_KEY`, `JIRA_API_TOKEN`, `GITHUB_TOKEN`, `SERP_API_KEY`) live in the Amplify sandbox.
+**Web (Vite + Lambda).** `VITE_SUPABASE_*_CURTIS` and `ALLOWED_EMAILS` are required. Non-secret integration settings (`JIRA_BASE_URL`, `JIRA_EMAIL`, `GROQ_MODEL`, `REQUIRE_CONFIRMATION`, GitHub activity filters, and so on) are copied into the Lambda at synth time. Secrets (`GROQ_API_KEY`, `GOOGLE_AI_STUDIO_API_KEY`, `GOOGLE_VERTEX_ACCESS_TOKEN`, `OPENROUTER_API_KEY`, `JIRA_API_TOKEN`, `GITHUB_TOKEN`, `SERP_API_KEY`) live in the Amplify sandbox. Google Vertex also needs the non-secret `GOOGLE_VERTEX_PROJECT_ID`.
 
-**Local bot and CLI.** The same secret names are read from `.env` by `dotenv`. Discord also needs `DISCORD_BOT_TOKEN` and `DISCORD_APP_ID`. Optional: `DISCORD_PUBLIC_KEY`, `DISCORD_CLIENT_SECRET`, `PUBLIC_BASE_URL`, extra Groq keys (`GROQ_API_KEY_2`, `GROQ_API_KEY_3`).
+**Local bot and CLI.** The same secret names are read from `.env` by `dotenv`, including `GOOGLE_VERTEX_PROJECT_ID` and `GOOGLE_VERTEX_ACCESS_TOKEN`. Discord also needs `DISCORD_BOT_TOKEN` and `DISCORD_APP_ID`. Optional: `DISCORD_PUBLIC_KEY`, `DISCORD_CLIENT_SECRET`, `PUBLIC_BASE_URL`, extra Groq keys (`GROQ_API_KEY_2`, `GROQ_API_KEY_3`).
 
 Defaults that are not secrets live in [`src/config.js`](src/config.js) and can be overridden with environment variables. That includes confirmation, the Firefox bridge port, GitHub activity filters, Jira project aliases, and cross-linking Jira issues with GitHub pull requests.
 

@@ -1,5 +1,5 @@
 /** Which API serves this model. Shown in brackets next to the name. */
-export type AgentRouter = 'Groq' | 'AI Studio' | 'OpenRouter';
+export type AgentRouter = 'Groq' | 'AI Studio' | 'Google Vertex' | 'OpenRouter';
 
 export interface AgentModel {
   id: string;
@@ -20,6 +20,11 @@ export const AGENT_MODELS: readonly AgentModel[] = [
   { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', detail: 'Everyday tasks', router: 'AI Studio' },
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', detail: 'Fastest', router: 'AI Studio' },
   { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', detail: 'Lowest cost', router: 'AI Studio' },
+  { id: 'vertex:gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', detail: 'Most capable', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.8-flash', label: 'Gemini 3.8 Flash', detail: 'Best for agents', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.6-flash', label: 'Gemini 3.6 Flash', detail: 'Everyday tasks', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', detail: 'Fastest', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', detail: 'Lowest cost', router: 'Google Vertex' },
   { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra', detail: 'Most capable', router: 'OpenRouter' },
   { id: 'openrouter:thinkingmachines/inkling:free', label: 'Inkling', detail: 'Strong reasoning', router: 'OpenRouter' },
   { id: 'openrouter:nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super', detail: 'Best for agents', router: 'OpenRouter' },

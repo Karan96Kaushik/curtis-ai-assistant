@@ -32,7 +32,7 @@ export const EVENT_TYPES = [
 
 export type EventType = (typeof EVENT_TYPES)[number];
 
-export type ProviderName = 'groq' | 'google' | 'openrouter';
+export type ProviderName = 'groq' | 'google' | 'google_vertex' | 'openrouter';
 
 export type RunTrigger = 'manual' | 'schedule' | 'webhook';
 

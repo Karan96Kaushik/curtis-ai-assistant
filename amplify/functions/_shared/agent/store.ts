@@ -27,7 +27,9 @@ function asStringArray(value: unknown): string[] {
 }
 
 function asProviders(value: unknown): ProviderName[] {
-  return asStringArray(value).filter((item): item is ProviderName => item === 'groq' || item === 'google' || item === 'openrouter');
+  return asStringArray(value).filter(
+    (item): item is ProviderName => item === 'groq' || item === 'google' || item === 'google_vertex' || item === 'openrouter'
+  );
 }
 
 export function snapshotFromRow(value: unknown): ProfileSnapshot | null {
@@ -50,7 +52,10 @@ export function snapshotFromRow(value: unknown): ProfileSnapshot | null {
       if (!item) return [];
       const provider = item.provider;
       const model = item.model;
-      if ((provider !== 'groq' && provider !== 'google' && provider !== 'openrouter') || typeof model !== 'string') {
+      if (
+        (provider !== 'groq' && provider !== 'google' && provider !== 'google_vertex' && provider !== 'openrouter') ||
+        typeof model !== 'string'
+      ) {
         return [];
       }
       return [{ provider, model }];
