@@ -51,6 +51,9 @@ export function providersInChain(chain: readonly ChainEntry[]): ChainProvider[] 
 /** Prefixed ids keep the same model name from colliding across providers. */
 export function apiModelId(provider: ChainProvider, model: string): string {
   if (provider === 'openrouter' && model.startsWith('openrouter:')) return model.slice('openrouter:'.length);
-  if (provider === 'google_vertex' && model.startsWith('vertex:')) return model.slice('vertex:'.length);
+  if (provider === 'google_vertex') {
+    const id = model.startsWith('vertex:') ? model.slice('vertex:'.length) : model;
+    return id.includes('/') ? id : `google/${id}`;
+  }
   return model;
 }
