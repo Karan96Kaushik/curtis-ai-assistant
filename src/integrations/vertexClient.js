@@ -12,10 +12,22 @@ function accessToken() {
   return String(process.env.GOOGLE_VERTEX_ACCESS_TOKEN || '').trim();
 }
 
+function credentialValue(raw) {
+  return String(raw || '').trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '');
+}
+
 /** OAuth access tokens use Bearer. API keys are rejected in that header. */
 function authHeaders(credential) {
   if (credential.startsWith('ya29.')) return { authorization: `Bearer ${credential}` };
   return { 'x-goog-api-key': credential };
+}
+
+function googleError(payload) {
+  const body = Array.isArray(payload) ? payload[0] : payload;
+  const error = body && typeof body === 'object' ? body.error : null;
+  if (!error || typeof error !== 'object') return null;
+  const reason = Array.isArray(error.details) ? error.details.find((item) => item && item.reason)?.reason : '';
+  return { message: String(error.message || error.status || ''), reason: String(reason || '') };
 }
 
 function projectId() {
@@ -73,7 +85,7 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
     err.name = 'AbortError';
     throw err;
   }
-  const key = accessToken();
+  const key = credentialValue(accessToken());
   const url = endpoint();
   if (!key) throw new Error('GOOGLE_VERTEX_ACCESS_TOKEN is not set');
   if (!url) throw new Error('GOOGLE_VERTEX_PROJECT_ID is not set');
@@ -119,10 +131,12 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
   }
 
   if (!res.ok) {
-    const message =
-      (payload && payload.error && (payload.error.message || payload.error.status)) ||
-      text ||
-      `Google Vertex request failed (${res.status})`;
+    const parsed = googleError(payload);
+    let message = parsed?.message || text || `Google Vertex request failed (${res.status})`;
+    if (parsed?.reason === 'ACCESS_TOKEN_TYPE_UNSUPPORTED') {
+      message =
+        'Google Vertex rejected GOOGLE_VERTEX_ACCESS_TOKEN. That value is an OAuth access token (ya29) Vertex will not accept. Put the API key in that secret instead.';
+    }
     const err = new Error(String(message));
     err.status = res.status;
     timer.end(`FAILED model=${apiModel} status=${res.status}`);
