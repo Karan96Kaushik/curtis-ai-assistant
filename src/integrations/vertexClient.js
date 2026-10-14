@@ -12,6 +12,12 @@ function accessToken() {
   return String(process.env.GOOGLE_VERTEX_ACCESS_TOKEN || '').trim();
 }
 
+/** OAuth access tokens use Bearer. API keys are rejected in that header. */
+function authHeaders(credential) {
+  if (credential.startsWith('ya29.')) return { authorization: `Bearer ${credential}` };
+  return { 'x-goog-api-key': credential };
+}
+
 function projectId() {
   return String(process.env.GOOGLE_VERTEX_PROJECT_ID || '').trim();
 }
@@ -90,7 +96,7 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${key}`,
+        ...authHeaders(key),
       },
       body: JSON.stringify(body),
       signal,

@@ -323,7 +323,9 @@ export async function callModelChain(opts: {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${key}`,
+            ...(current.provider === 'google_vertex' && !key.startsWith('ya29.')
+              ? { 'x-goog-api-key': key }
+              : { authorization: `Bearer ${key}` }),
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
