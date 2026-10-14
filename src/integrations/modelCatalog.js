@@ -28,6 +28,14 @@ const GOOGLE = [
   { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', router: 'AI Studio' },
 ];
 
+const VERTEX = [
+  { id: 'vertex:gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.8-flash', label: 'Gemini 3.8 Flash', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.6-flash', label: 'Gemini 3.6 Flash', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', router: 'Google Vertex' },
+  { id: 'vertex:gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', router: 'Google Vertex' },
+];
+
 const OPENROUTER = [
   { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra', router: 'OpenRouter' },
   { id: 'openrouter:thinkingmachines/inkling:free', label: 'Inkling', router: 'OpenRouter' },
@@ -43,7 +51,7 @@ const OPENROUTER_EXTRA = [
   { id: 'openrouter:google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B', router: 'OpenRouter' },
 ];
 
-const ALL = [...GROQ, ...GROQ_EXTRA, ...GOOGLE, ...OPENROUTER, ...OPENROUTER_EXTRA];
+const ALL = [...GROQ, ...GROQ_EXTRA, ...GOOGLE, ...VERTEX, ...OPENROUTER, ...OPENROUTER_EXTRA];
 
 function isGoogleModel(modelId) {
   return String(modelId || '').startsWith('gemini-');
@@ -53,7 +61,12 @@ function isOpenRouterModel(modelId) {
   return String(modelId || '').startsWith('openrouter:');
 }
 
+function isVertexModel(modelId) {
+  return String(modelId || '').startsWith('vertex:');
+}
+
 function chainFor(modelId) {
+  if (isVertexModel(modelId)) return VERTEX;
   if (isGoogleModel(modelId)) return GOOGLE;
   if (isOpenRouterModel(modelId)) return OPENROUTER;
   return GROQ;
@@ -73,7 +86,7 @@ function modelLabel(modelId) {
 function candidates(modelId, failedIds) {
   const failed = new Set(failedIds || []);
   const chain = chainFor(modelId).map((model) => model.id);
-  if (!isGoogleModel(modelId) && !isOpenRouterModel(modelId)) {
+  if (!isGoogleModel(modelId) && !isOpenRouterModel(modelId) && !isVertexModel(modelId)) {
     const extra = String(process.env.GROQ_FALLBACK_MODEL || '').trim();
     if (extra && !chain.includes(extra)) chain.push(extra);
   }

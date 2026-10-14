@@ -471,9 +471,11 @@ async function handleUserMessage(input) {
     const missingKey =
       provider === 'AI Studio'
         ? 'GOOGLE_AI_STUDIO_API_KEY is not set'
-        : provider === 'OpenRouter'
-          ? 'OPENROUTER_API_KEY is not set'
-          : 'GROQ_API_KEY is not set';
+        : provider === 'Google Vertex'
+          ? 'GOOGLE_VERTEX_ACCESS_TOKEN or GOOGLE_VERTEX_PROJECT_ID is not set'
+          : provider === 'OpenRouter'
+            ? 'OPENROUTER_API_KEY is not set'
+            : 'GROQ_API_KEY is not set';
     throw new Error(missingKey);
   }
 

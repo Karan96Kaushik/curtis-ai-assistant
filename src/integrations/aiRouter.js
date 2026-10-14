@@ -1,17 +1,19 @@
 /**
- * Picks Groq, Google AI Studio, or OpenRouter for a chat completion.
+ * Picks Groq, Google AI Studio, Google Vertex, or OpenRouter for a chat completion.
  * If that model errors, the other models on the same router are tried.
  * The turn records the switch so the reply can tell the user.
  */
 
 const groq = require('./groqClient');
 const google = require('./googleAiClient');
+const vertex = require('./vertexClient');
 const openrouter = require('./openRouterClient');
 const catalog = require('./modelCatalog');
 const { appendModelDebug } = require('./modelDebugCapture');
 
 function providerLabel(modelId) {
   const id = modelId || groq.activeModel();
+  if (vertex.isVertexModel(id)) return 'Google Vertex';
   if (String(id || '').startsWith('gemini-')) return 'AI Studio';
   if (openrouter.isOpenRouterModel(id)) return 'OpenRouter';
   return 'Groq';
@@ -19,12 +21,14 @@ function providerLabel(modelId) {
 
 function isConfigured() {
   const id = groq.activeModel();
+  if (vertex.isVertexModel(id)) return vertex.isConfigured();
   if (String(id || '').startsWith('gemini-')) return google.isConfigured();
   if (openrouter.isOpenRouterModel(id)) return openrouter.isConfigured();
   return groq.isConfigured();
 }
 
 function dispatch(opts) {
+  if (vertex.isVertexModel(opts.model)) return vertex.chat(opts);
   if (String(opts.model || '').startsWith('gemini-')) return google.chat(opts);
   if (openrouter.isOpenRouterModel(opts.model)) return openrouter.chat(opts);
   return groq.chat(opts);
@@ -63,7 +67,7 @@ function rememberSwitch(turn, from, to) {
 
 /**
  * Same options as groqClient.chat.
- * A Gemini id goes to Google AI Studio. An openrouter: id goes to OpenRouter.
+ * A vertex: id goes to Google Vertex. A Gemini id goes to Google AI Studio. An openrouter: id goes to OpenRouter.
  * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, model?: string, temperature?: number, responseFormat?: object, signal?: AbortSignal }} [opts]
  */
 async function chat(opts = {}) {
