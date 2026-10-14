@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+vertex-key.json
 .DS_Store
 *.log
 .npm/

@@ -1,4 +1,5 @@
 import { apiModelId } from '../../../../lib/agents/modelChain.js';
+import vertexClient from '../../../../src/integrations/vertexClient.js';
 import type { ChatMessage, ModelTool, ModelTurn, ProfileSnapshot, ProviderFallback, ProviderName } from './types.js';
 
 const ENDPOINTS: Record<ProviderName, { url?: string; env: string }> = {
@@ -286,9 +287,23 @@ export async function callModelChain(opts: {
     const current = chain[i];
     const next = chain[i + 1];
     const endpoint = ENDPOINTS[current.provider];
-    const keys = providerApiKeys(current.provider);
-    const url =
-      current.provider === 'google_vertex' ? vertexChatCompletionsUrl(process.env.GOOGLE_VERTEX_PROJECT_ID) : endpoint.url;
+    let keys = providerApiKeys(current.provider);
+    let url = current.provider === 'google_vertex' ? undefined : endpoint.url;
+    let vertexHeaders: Record<string, string> | null = null;
+    if (current.provider === 'google_vertex') {
+      try {
+        const resolved = await (
+          vertexClient as { resolveVertexRequest: () => Promise<{ projectId: string; headers: Record<string, string> }> }
+        ).resolveVertexRequest();
+        url = vertexChatCompletionsUrl(resolved.projectId) ?? undefined;
+        vertexHeaders = resolved.headers;
+        keys = ['service-account'];
+      } catch (err) {
+        lastMessage = err instanceof Error ? err.message : `${current.provider} is not configured.`;
+        if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: 0, detail: lastMessage });
+        continue;
+      }
+    }
     if (!keys.length || !url) {
       lastMessage = `${current.provider} is not configured.`;
       if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: 0 });
@@ -323,9 +338,10 @@ export async function callModelChain(opts: {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            ...(current.provider === 'google_vertex' && !key.startsWith('ya29.')
-              ? { 'x-goog-api-key': key }
-              : { authorization: `Bearer ${key}` }),
+            ...(vertexHeaders ??
+              (current.provider === 'google_vertex' && !key.startsWith('ya29.')
+                ? { 'x-goog-api-key': key }
+                : { authorization: `Bearer ${key}` })),
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
