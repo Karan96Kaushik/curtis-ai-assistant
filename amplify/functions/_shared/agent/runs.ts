@@ -54,11 +54,11 @@ export async function ensureInboxProfile(rt: AgentRuntime, userId: string): Prom
     approval_required: draft.approval_required,
     allowed_apps: draft.allowed_apps,
     model_chain: draft.model_chain.flatMap((entry) => {
-      if (entry.provider !== 'groq' && entry.provider !== 'google' && entry.provider !== 'openrouter') return [];
+      if (entry.provider !== 'groq' && entry.provider !== 'google' && entry.provider !== 'google_vertex' && entry.provider !== 'openrouter') return [];
       return [{ provider: entry.provider, model: entry.model }];
     }),
     allowed_providers: draft.allowed_providers.flatMap((provider) =>
-      provider === 'groq' || provider === 'google' || provider === 'openrouter' ? [provider] : []
+      provider === 'groq' || provider === 'google' || provider === 'google_vertex' || provider === 'openrouter' ? [provider] : []
     ),
     max_steps: draft.max_steps,
     max_runtime_min: draft.max_runtime_min,

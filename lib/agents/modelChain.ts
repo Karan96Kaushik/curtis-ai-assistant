@@ -2,7 +2,7 @@ import { AGENT_MODELS, type AgentRouter } from '@/lib/chat/models';
 
 export const DEFAULT_MODEL_IDS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'gemini-3.5-flash-lite'] as const;
 
-export type ChainProvider = 'groq' | 'google' | 'openrouter';
+export type ChainProvider = 'groq' | 'google' | 'google_vertex' | 'openrouter';
 
 export interface ChainEntry {
   provider: ChainProvider;
@@ -11,6 +11,7 @@ export interface ChainEntry {
 
 export function providerForRouter(router: AgentRouter): ChainProvider {
   if (router === 'AI Studio') return 'google';
+  if (router === 'Google Vertex') return 'google_vertex';
   if (router === 'OpenRouter') return 'openrouter';
   return 'groq';
 }
@@ -47,8 +48,9 @@ export function providersInChain(chain: readonly ChainEntry[]): ChainProvider[] 
   return [...new Set(chain.map((entry) => entry.provider))];
 }
 
-/** OpenRouter ids in the app are prefixed so they do not collide with Groq ids. */
+/** Prefixed ids keep the same model name from colliding across providers. */
 export function apiModelId(provider: ChainProvider, model: string): string {
   if (provider === 'openrouter' && model.startsWith('openrouter:')) return model.slice('openrouter:'.length);
+  if (provider === 'google_vertex' && model.startsWith('vertex:')) return model.slice('vertex:'.length);
   return model;
 }

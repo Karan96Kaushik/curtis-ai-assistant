@@ -86,7 +86,7 @@ export interface ProfileDraft {
   resource_scopes: Record<string, unknown>;
 }
 
-const PROVIDERS = new Set<ProviderName>(['groq', 'google', 'openrouter']);
+const PROVIDERS = new Set<ProviderName>(['groq', 'google', 'google_vertex', 'openrouter']);
 
 function isProvider(value: string): value is ProviderName {
   return PROVIDERS.has(value as ProviderName);

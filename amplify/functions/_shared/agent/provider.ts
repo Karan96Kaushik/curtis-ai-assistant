@@ -1,14 +1,22 @@
 import { apiModelId } from '../../../../lib/agents/modelChain.js';
 import type { ChatMessage, ModelTool, ModelTurn, ProfileSnapshot, ProviderFallback, ProviderName } from './types.js';
 
-const ENDPOINTS: Record<ProviderName, { url: string; env: string }> = {
+const ENDPOINTS: Record<ProviderName, { url?: string; env: string }> = {
   groq: { url: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   google: {
     url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     env: 'GOOGLE_AI_STUDIO_API_KEY',
   },
+  google_vertex: { env: 'GOOGLE_VERTEX_ACCESS_TOKEN' },
   openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions', env: 'OPENROUTER_API_KEY' },
 };
+
+/** Gemini 3.x on Vertex is served from the global publisher endpoint. */
+export function vertexChatCompletionsUrl(projectId: string | undefined): string | null {
+  const project = projectId?.trim();
+  if (!project) return null;
+  return `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/global/endpoints/openapi/chat/completions`;
+}
 
 const CALL_TIMEOUT_MS = 18_000;
 
@@ -124,7 +132,7 @@ export function toProviderMessages(messages: ChatMessage[], provider?: ProviderN
           arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}),
         },
       };
-      if (provider === 'google') {
+      if (provider === 'google' || provider === 'google_vertex') {
         const signature = thoughtSignatureOf(call) || (index === 0 ? SKIP_THOUGHT_SIGNATURE : undefined);
         if (signature) {
           wire.extra_content = { google: { thought_signature: signature } };
@@ -248,7 +256,9 @@ export async function callModelChain(opts: {
     const next = chain[i + 1];
     const endpoint = ENDPOINTS[current.provider];
     const key = process.env[endpoint.env]?.trim() ?? '';
-    if (!key) {
+    const url =
+      current.provider === 'google_vertex' ? vertexChatCompletionsUrl(process.env.GOOGLE_VERTEX_PROJECT_ID) : endpoint.url;
+    if (!key || !url) {
       lastMessage = `${current.provider} is not configured.`;
       if (next) fallbacks.push({ from: `${current.provider}:${current.model}`, to: `${next.provider}:${next.model}`, status: 0 });
       continue;
@@ -269,7 +279,7 @@ export async function callModelChain(opts: {
     const started = Date.now();
     let res: Response;
     try {
-      res = await fetchImpl(endpoint.url, {
+      res = await fetchImpl(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
