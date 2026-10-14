@@ -69,7 +69,8 @@ async function chat({ messages, tools, toolChoice, model, temperature = 0.2, res
   }
   const key = accessToken();
   const url = endpoint();
-  if (!key || !url) throw new Error('GOOGLE_VERTEX_ACCESS_TOKEN or GOOGLE_VERTEX_PROJECT_ID is not set');
+  if (!key) throw new Error('GOOGLE_VERTEX_ACCESS_TOKEN is not set');
+  if (!url) throw new Error('GOOGLE_VERTEX_PROJECT_ID is not set');
   const apiModel = toApiModelId(model);
   if (!apiModel) throw new Error('Google Vertex requires a model id');
 
